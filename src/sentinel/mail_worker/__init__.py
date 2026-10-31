@@ -1,0 +1,1 @@
+"""Worker de correo SMTP."""

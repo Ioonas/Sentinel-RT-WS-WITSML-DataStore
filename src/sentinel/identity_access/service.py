@@ -1,0 +1,451 @@
+"""Casos de uso de identidad y acceso.
+
+Este módulo es núcleo: no importa adaptadores. Recibe puertos por inyección.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from sentinel.identity_access.domain import (
+    ALL_ADMIN_PERMISSIONS,
+    AdminPermission,
+    Grant,
+    HumanRole,
+    Principal,
+    ServiceRole,
+    WitsmlAction,
+    permissions_for_role,
+)
+from sentinel.identity_access.ports import (
+    AdminUserRecord,
+    IdentityRepositoryPort,
+    InvitationRecord,
+    PasswordHasherPort,
+    PasswordResetRecord,
+    ServiceAccountRecord,
+    SessionRecord,
+    TokenHasherPort,
+)
+from sentinel.shared.clock import Clock
+from sentinel.shared.errors import (
+    AuthenticationError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
+from sentinel.shared.ids import IdGenerator
+
+_ACCOUNT_NAME = re.compile(r"^[A-Za-z0-9._-]{3,64}$")
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+SESSION_TTL = timedelta(hours=12)
+REAUTH_WINDOW = timedelta(minutes=15)
+INVITATION_TTL = timedelta(hours=72)
+
+
+@dataclass(frozen=True)
+class LoginResult:
+    token: str
+    csrf_token: str
+    principal: Principal
+    expires_at: datetime
+
+
+class IdentityService:
+    def __init__(
+        self,
+        repository: IdentityRepositoryPort,
+        hasher: PasswordHasherPort,
+        token_hasher: TokenHasherPort,
+        clock: Clock,
+        ids: IdGenerator,
+    ) -> None:
+        self._repo = repository
+        self._hasher = hasher
+        self._tokens = token_hasher
+        self._clock = clock
+        self._ids = ids
+
+    # ------------------------------------------------------------------
+    # Cuentas de servicio (HTTP Basic en WMLS)
+    # ------------------------------------------------------------------
+    async def authenticate_service_account(
+        self, name: str, secret: str
+    ) -> Principal | None:
+        account = await self._repo.get_service_account_by_name(name)
+        if account is None or not account.enabled or not account.credential_hash:
+            # Verificación ficticia para no filtrar por tiempo si la cuenta no existe.
+            self._hasher.verify(secret, "$argon2id$v=19$m=65536,t=3,p=2$aaaaaaaaaaaaaaaa$")
+            return None
+        if not self._hasher.verify(secret, account.credential_hash):
+            return None
+        account.last_used_at = self._clock.now()
+        await self._repo.save_service_account(account)
+        return account.to_principal()
+
+    async def create_service_account(
+        self,
+        *,
+        name: str,
+        role: ServiceRole,
+        grants: list[Grant],
+        well_scope: set[str] | None,
+    ) -> tuple[ServiceAccountRecord, str]:
+        if not _ACCOUNT_NAME.match(name):
+            raise ValidationError(
+                "El nombre de la cuenta debe tener 3-64 caracteres [A-Za-z0-9._-]."
+            )
+        if await self._repo.get_service_account_by_name(name) is not None:
+            raise ConflictError("Ya existe una cuenta de servicio con ese nombre.")
+        self._validate_grants(role, grants)
+        secret = self._new_secret()
+        now = self._clock.now()
+        account = ServiceAccountRecord(
+            id=self._ids.new_uid(),
+            name=name,
+            role=role,
+            enabled=True,
+            credential_hash=self._hasher.hash(secret),
+            grants=tuple(grants),
+            well_scope=frozenset(well_scope) if well_scope else None,
+            created_at=now,
+            rotated_at=now,
+        )
+        await self._repo.save_service_account(account)
+        return account, secret
+
+    async def update_service_account(
+        self,
+        account_id: str,
+        *,
+        enabled: bool | None = None,
+        grants: list[Grant] | None = None,
+        well_scope: set[str] | None = None,
+        role: ServiceRole | None = None,
+    ) -> ServiceAccountRecord:
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        effective_role = role or account.role
+        effective_grants = tuple(grants) if grants is not None else account.grants
+        self._validate_grants(effective_role, list(effective_grants))
+        account.role = effective_role
+        account.grants = effective_grants
+        if well_scope is not None:
+            account.well_scope = frozenset(well_scope) or None
+        if enabled is not None:
+            account.enabled = enabled
+        await self._repo.save_service_account(account)
+        return account
+
+    async def rotate_credential(self, account_id: str) -> str:
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        secret = self._new_secret()
+        account.credential_hash = self._hasher.hash(secret)
+        account.rotated_at = self._clock.now()
+        account.enabled = True
+        await self._repo.save_service_account(account)
+        return secret
+
+    async def revoke_credential(self, account_id: str) -> None:
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        account.credential_hash = None
+        account.enabled = False
+        await self._repo.save_service_account(account)
+
+    async def list_service_accounts(self) -> list[ServiceAccountRecord]:
+        return await self._repo.list_service_accounts()
+
+    async def get_service_account(self, account_id: str) -> ServiceAccountRecord:
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        return account
+
+    # ------------------------------------------------------------------
+    # Sesiones humanas
+    # ------------------------------------------------------------------
+    async def login(self, email: str, password: str) -> LoginResult:
+        user = await self._repo.get_admin_user_by_email(email.strip().lower())
+        if user is None or not user.enabled:
+            # Mensaje genérico: no se revela si la cuenta existe o está deshabilitada.
+            raise AuthenticationError("Credenciales inválidas.")
+        if not self._hasher.verify(password, user.password_hash):
+            raise AuthenticationError("Credenciales inválidas.")
+        if self._hasher.needs_rehash(user.password_hash):
+            user.password_hash = self._hasher.hash(password)
+        now = self._clock.now()
+        user.last_login_at = now
+        await self._repo.save_admin_user(user)
+
+        token = self._ids.new_token()
+        csrf = self._ids.new_token(24)
+        expires_at = now + SESSION_TTL
+        await self._repo.save_session(
+            SessionRecord(
+                token_hash=self._tokens.hash_token(token),
+                user_id=user.id,
+                csrf_token=csrf,
+                created_at=now,
+                expires_at=expires_at,
+                authenticated_at=now,
+            )
+        )
+        return LoginResult(
+            token=token,
+            csrf_token=csrf,
+            principal=user.to_principal(),
+            expires_at=expires_at,
+        )
+
+    async def resolve_session(self, token: str) -> tuple[Principal, SessionRecord] | None:
+        if not token:
+            return None
+        session = await self._repo.get_session(self._tokens.hash_token(token))
+        if session is None or session.revoked_at is not None:
+            return None
+        if session.expires_at <= self._clock.now():
+            return None
+        user = await self._repo.get_admin_user(session.user_id)
+        if user is None or not user.enabled:
+            return None
+        return user.to_principal(), session
+
+    async def logout(self, token: str) -> None:
+        if token:
+            await self._repo.revoke_session(
+                self._tokens.hash_token(token), self._clock.now()
+            )
+
+    # ------------------------------------------------------------------
+    # Usuarios administrativos e invitaciones
+    # ------------------------------------------------------------------
+    async def create_admin_user(
+        self,
+        *,
+        email: str,
+        display_name: str,
+        role: HumanRole,
+        password: str,
+        permissions: set[str] | None = None,
+        must_change_password: bool = False,
+    ) -> AdminUserRecord:
+        normalized = email.strip().lower()
+        if not _EMAIL.match(normalized):
+            raise ValidationError("El correo no tiene un formato válido.")
+        if await self._repo.get_admin_user_by_email(normalized) is not None:
+            raise ConflictError("Ya existe un usuario administrativo con ese correo.")
+        self._validate_password(password)
+        delegated = self._validate_delegated_permissions(role, permissions)
+        user = AdminUserRecord(
+            id=self._ids.new_uid(),
+            email=normalized,
+            display_name=display_name.strip() or normalized,
+            role=role,
+            password_hash=self._hasher.hash(password),
+            enabled=True,
+            permissions=permissions_for_role(role.value, sorted(delegated)),
+            must_change_password=must_change_password,
+            created_at=self._clock.now(),
+        )
+        await self._repo.save_admin_user(user)
+        return user
+
+    async def update_admin_user(
+        self,
+        user_id: str,
+        *,
+        enabled: bool | None = None,
+        role: HumanRole | None = None,
+        permissions: set[str] | None = None,
+        display_name: str | None = None,
+    ) -> AdminUserRecord:
+        user = await self._repo.get_admin_user(user_id)
+        if user is None:
+            raise NotFoundError("Usuario administrativo no encontrado.")
+        effective_role = role or user.role
+        delegated = self._validate_delegated_permissions(effective_role, permissions)
+        if effective_role != user.role:
+            user.role = effective_role
+            user.permissions = permissions_for_role(effective_role.value, sorted(delegated))
+        elif permissions is not None:
+            user.permissions = permissions_for_role(effective_role.value, sorted(delegated))
+        if display_name is not None:
+            user.display_name = display_name.strip() or user.email
+        if enabled is not None:
+            user.enabled = enabled
+            if not enabled:
+                await self._repo.revoke_user_sessions(user_id, self._clock.now())
+        await self._repo.save_admin_user(user)
+        return user
+
+    async def change_password(
+        self, user_id: str, current_password: str, new_password: str
+    ) -> None:
+        user = await self._repo.get_admin_user(user_id)
+        if user is None:
+            raise NotFoundError("Usuario no encontrado.")
+        if not self._hasher.verify(current_password, user.password_hash):
+            raise AuthenticationError("La contraseña actual no es válida.")
+        self._validate_password(new_password)
+        user.password_hash = self._hasher.hash(new_password)
+        user.must_change_password = False
+        await self._repo.save_admin_user(user)
+        # Cambiar contraseña revoca sesiones activas (spec §8).
+        await self._repo.revoke_user_sessions(user_id, self._clock.now())
+
+    async def create_invitation(
+        self,
+        *,
+        email: str,
+        role: HumanRole,
+        created_by: str,
+        permissions: set[str] | None = None,
+    ) -> tuple[InvitationRecord, str]:
+        normalized = email.strip().lower()
+        if not _EMAIL.match(normalized):
+            raise ValidationError("El correo no tiene un formato válido.")
+        if await self._repo.get_admin_user_by_email(normalized) is not None:
+            raise ConflictError("Ya existe un usuario con ese correo.")
+        delegated = self._validate_delegated_permissions(role, permissions)
+        token = self._ids.new_token()
+        now = self._clock.now()
+        invitation = InvitationRecord(
+            id=self._ids.new_uid(),
+            email=normalized,
+            role=role,
+            token_hash=self._tokens.hash_token(token),
+            expires_at=now + INVITATION_TTL,
+            created_by=created_by,
+            permissions=permissions_for_role(role.value, sorted(delegated)),
+            created_at=now,
+        )
+        await self._repo.save_invitation(invitation)
+        return invitation, token
+
+    async def accept_invitation(
+        self, token: str, password: str, display_name: str | None = None
+    ) -> AdminUserRecord:
+        invitation = await self._repo.get_invitation_by_token_hash(
+            self._tokens.hash_token(token)
+        )
+        now = self._clock.now()
+        if (
+            invitation is None
+            or invitation.accepted_at is not None
+            or invitation.expires_at <= now
+        ):
+            raise ValidationError("La invitación no es válida o ha expirado.")
+        self._validate_password(password)
+        if await self._repo.get_admin_user_by_email(invitation.email) is not None:
+            raise ConflictError("Ya existe un usuario con ese correo.")
+        user = AdminUserRecord(
+            id=self._ids.new_uid(),
+            email=invitation.email,
+            display_name=display_name or invitation.email,
+            role=invitation.role,
+            password_hash=self._hasher.hash(password),
+            enabled=True,
+            permissions=invitation.permissions,
+            created_at=now,
+        )
+        await self._repo.save_admin_user(user)
+        await self._repo.mark_invitation_accepted(invitation.id, now)
+        return user
+
+    async def list_admin_users(self) -> list[AdminUserRecord]:
+        return await self._repo.list_admin_users()
+
+    async def get_admin_user(self, user_id: str) -> AdminUserRecord:
+        user = await self._repo.get_admin_user(user_id)
+        if user is None:
+            raise NotFoundError("Usuario administrativo no encontrado.")
+        return user
+
+    async def request_password_reset(
+        self, email: str
+    ) -> tuple[str | None, AdminUserRecord | None]:
+        """Devuelve el token solo si la cuenta existe y está habilitada.
+
+        El adaptador responde siempre de forma genérica para no enumerar cuentas.
+        """
+        user = await self._repo.get_admin_user_by_email(email.strip().lower())
+        if user is None or not user.enabled:
+            return None, None
+        token = self._ids.new_token()
+        now = self._clock.now()
+        await self._repo.save_password_reset(
+            PasswordResetRecord(
+                token_hash=self._tokens.hash_token(token),
+                user_id=user.id,
+                expires_at=now + timedelta(hours=1),
+                created_at=now,
+            )
+        )
+        return token, user
+
+    async def reset_password(self, token: str, new_password: str) -> None:
+        reset = await self._repo.get_password_reset(self._tokens.hash_token(token))
+        now = self._clock.now()
+        if reset is None or reset.used_at is not None or reset.expires_at <= now:
+            raise ValidationError("El enlace de recuperación no es válido o expiró.")
+        user = await self._repo.get_admin_user(reset.user_id)
+        if user is None:
+            raise ValidationError("El enlace de recuperación no es válido o expiró.")
+        self._validate_password(new_password)
+        user.password_hash = self._hasher.hash(new_password)
+        user.must_change_password = False
+        await self._repo.save_admin_user(user)
+        await self._repo.mark_password_reset_used(reset.token_hash, now)
+        await self._repo.revoke_user_sessions(user.id, now)
+
+    # ------------------------------------------------------------------
+    # Utilidades
+    # ------------------------------------------------------------------
+    def _new_secret(self) -> str:
+        return f"srtws_{self._ids.new_token(32)}"
+
+    def _validate_password(self, password: str) -> None:
+        if len(password) < 12:
+            raise ValidationError("La contraseña debe tener al menos 12 caracteres.")
+        if password.lower() == password or password.upper() == password:
+            raise ValidationError("La contraseña debe combinar mayúsculas y minúsculas.")
+        if not any(ch.isdigit() for ch in password):
+            raise ValidationError("La contraseña debe incluir al menos un dígito.")
+
+    def _validate_grants(self, role: ServiceRole, grants: list[Grant]) -> None:
+        if not grants:
+            raise ValidationError("La cuenta de servicio requiere al menos un permiso.")
+        for grant in grants:
+            if grant.object_type not in ("*", "well", "wellbore", "log", "trajectory"):
+                raise ValidationError(f"Tipo de objeto no soportado: {grant.object_type}")
+            if role == ServiceRole.READER and grant.action != WitsmlAction.READ:
+                raise ValidationError(
+                    "Una cuenta reader solo puede recibir permisos de lectura."
+                )
+
+    def _validate_delegated_permissions(
+        self, role: HumanRole, permissions: set[str] | None
+    ) -> set[str]:
+        delegated = set(permissions or ())
+        unknown = delegated - ALL_ADMIN_PERMISSIONS
+        if unknown:
+            raise ValidationError(f"Permisos desconocidos: {sorted(unknown)}")
+        if role != HumanRole.ADMIN and delegated:
+            raise ValidationError(
+                "Solo el rol administrador acepta permisos delegados explícitos."
+            )
+        return delegated
+
+
+def ensure_permission(principal: Principal, permission: AdminPermission) -> None:
+    if not principal.has(permission):
+        raise PermissionDenied("No tiene permiso para esta operación.")
