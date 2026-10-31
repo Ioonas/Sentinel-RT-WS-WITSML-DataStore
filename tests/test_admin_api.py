@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
+
 from tests.conftest import ADMIN_PASSWORD, CONTACT
 
 pytestmark = pytest.mark.integration
