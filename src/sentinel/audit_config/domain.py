@@ -34,10 +34,11 @@ class ServerConfig:
     schema_version: str = "1.4.1.1"
     api_version: str = "1.4.1"
     setup_completed: bool = False
+    # Referencia aprobada en D-17 del expediente (§ Valores de GetCap).
     max_data_nodes: int = 10_000
-    max_data_points: int = 100_000
-    growing_timeout_seconds: int = 60
-    change_detection_seconds: int = 5
+    max_data_points: int = 3_000_000
+    growing_timeout_seconds: int = 3_600
+    change_detection_seconds: int = 60
     max_request_latest_values: int = 500
     cascaded_delete: bool = False
     support_uom_conversion: bool = False

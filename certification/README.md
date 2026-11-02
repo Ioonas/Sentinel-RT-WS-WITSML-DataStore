@@ -150,21 +150,46 @@ Get-Content $log | Select-String "completed: (Pass|Fail|Skipped)" |
 
 ## 6. Evidencia archivada
 
-| Fecha (UTC) | Suite | Scripts | Fallos | Resultado |
-| --- | --- | --- | --- | --- |
-| 2026-11-01 20:12 | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 70 pass, 6 skipped | 0 | `!*** SUCCESS` |
+| Ejecución | Suite | Duración | Scripts | Fallos | Resultado |
+| --- | --- | --- | --- | --- | --- |
+| `log_20261101203643`<br>(2026-11-01 20:36, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 79 min 42 s | 70 pass, 6 skipped | 0 | `!*** SUCCESS` |
+
+Esta ejecución es la que certifica la configuración publicada: `maxDataPoints`
+3 000 000, `growingTimeoutPeriod` 3 600 s, `changeDetectionPeriod` 60 s
+(D-17) y respuestas gzip según `Accept-Encoding`, sin `compressionMethod` en
+`GetCap` (D-01). Se ejecutó con el dataset estándar recién cargado y con
+`data_grower_script` publicando en `Energistics-w1-wb1-log-0001` y
+`Energistics-w1-wb1-trajectory-0001` durante toda la suite.
 
 Los 6 scripts omitidos corresponden a objetos fuera del alcance 1.0.3
 (`mudLog` y afines) que la suite salta por capacidades no declaradas. Artefactos
 y manifiesto local (ignorados por Git):
 
-- `certification/results/log_20261101201203.txt`
-  — `d8bd3d0f1d02d6b56ff8c7c7cd617f12b14b390cefe932352b52871d911aafee`
-- `certification/results/log_20261101201203_soap.txt`
-  — `7b72cb174f476f71b4d6ccc00499a805d4a1ae0d5d6c537adfc42703a4fe2f2b`
+- `certification/results/log_20261101203643.txt`
+  — `2b8390ab588dac1d401d064812f7c3a6168e6c3caeac99aa7e18719546890531`
+- `certification/results/log_20261101203643_soap.txt`
+  — `164a7244f639873c662c5dba713a4b041358f95cb1b4d17cfca6fd01cb7df75f`
 - `certification/results/wpctt_witsml_result.txt`
-  — `a3e3e8e7977d67aacc5704de5ddeb12ad007df35eba13299340883731a15af7c`
+  — `2178c03876f2f1d64fe685b463a29924ea1570072a204b79db45f3a2aa9c0ee3`
 - `certification/manifests/wpctt_20261101.sha256`
+
+### 6.1 `changeDetectionPeriod`: 60 s frente a 600 s
+
+El expediente contiene dos valores para esta capacidad:
+
+- **D-17** (decisión aprobada) fija `changeDetectionPeriod` en **60 s**.
+- La tabla de «Valores de GetCap» (línea 278) anota junto a ese mismo valor
+  «Debe ser = 600 s; se valida con la prueba de polling (485)».
+
+Gobierna **D-17**, porque es la decisión cerrada y la que se aplicó a
+`server_config` y a los valores por defecto del producto. La suite oficial no
+fija un umbral: los scripts `test61`, `test78`, `test79a`, `test79b` y `test80`
+esperan `changeDetectionPeriod + 1` segundos antes de consultar el `changeLog`,
+de modo que cualquier valor declarado es coherente mientras el servidor lo
+respete. Declarar 60 s ahorra ~117 minutos de espera (13 pausas) sin alterar la
+semántica. Si en la evaluación formal se exige el valor de 600 s, basta
+actualizar `server_config.change_detection_seconds` (o el valor por defecto de
+`ServerConfig`) y repetir la suite: no hay cambios de código asociados.
 
 ## 7. Triaje
 

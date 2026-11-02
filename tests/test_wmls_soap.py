@@ -158,12 +158,16 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     assert cap_server.findtext(f"{{{API_NS}}}schemaVersion") == "1.4.1.1"
     assert cap_server.findtext(f"{{{API_NS}}}cascadedDelete") == "false"
     assert cap_server.findtext(f"{{{API_NS}}}supportUomConversion") == "false"
-    assert cap_server.findtext(f"{{{API_NS}}}compressionMethod") == "none"
-    growing = {
-        element.get("dataObject")
-        for element in cap_server.findall(f"{{{API_NS}}}growingTimeoutPeriod")
-    }
-    assert growing == {"log", "trajectory"}
+    # D-01: compressionMethod no se declara; solo describe compresión de
+    # solicitudes y las respuestas se comprimen según Accept-Encoding.
+    assert cap_server.find(f"{{{API_NS}}}compressionMethod") is None
+    # D-17: referencia aprobada de límites y crecimiento.
+    assert cap_server.findtext(f"{{{API_NS}}}changeDetectionPeriod") == "60"
+    assert cap_server.findtext(f"{{{API_NS}}}maxRequestLatestValues") == "500"
+    growing = {}
+    for element in cap_server.findall(f"{{{API_NS}}}growingTimeoutPeriod"):
+        growing[element.get("dataObject")] = element.text
+    assert growing == {"log": "3600", "trajectory": "3600"}
 
     functions = {
         element.get("name"): element
@@ -183,9 +187,9 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
         for element in functions["WMLS_GetFromStore"].findall(f"{{{API_NS}}}dataObject")
     }
     assert set(read_objects) == {"changeLog", "log", "trajectory", "well", "wellbore"}
-    assert read_objects["log"].get("maxDataNodes")
-    assert read_objects["log"].get("maxDataPoints")
-    assert read_objects["trajectory"].get("maxDataNodes")
+    assert read_objects["log"].get("maxDataNodes") == "10000"
+    assert read_objects["log"].get("maxDataPoints") == "3000000"
+    assert read_objects["trajectory"].get("maxDataNodes") == "10000"
     assert read_objects["trajectory"].get("maxDataPoints") is None
     write_objects = {
         element.text: element
@@ -528,6 +532,37 @@ async def test_published_wsdl_is_official(admin_client: AsyncClient) -> None:
         "location='http://testserver/witsml'",
         "location='http://yourorg.com/yourwebservice'",
     ) == official
+
+
+async def test_wmls_gzip_responses(admin_client: AsyncClient, csrf: str) -> None:
+    """D-01: las respuestas WMLS usan gzip cuando el cliente lo acepta."""
+    secret = await create_writer(admin_client, csrf)
+    credentials = base64.b64encode(f"acme.writer:{secret}".encode()).decode()
+    headers = {
+        "content-type": "text/xml; charset=utf-8",
+        "authorization": f"Basic {credentials}",
+    }
+
+    compressed = await admin_client.post(
+        "/witsml",
+        content=envelope("WMLS_GetVersion"),
+        headers={**headers, "accept-encoding": "gzip"},
+    )
+    assert compressed.status_code == 200, compressed.text
+    assert compressed.headers["content-encoding"] == "gzip"
+    assert "Accept-Encoding" in compressed.headers["vary"]
+    root = etree.fromstring(compressed.content)
+    assert root.tag == f"{{{SOAP_NS}}}Envelope"
+    assert field(compressed, "Result") == "1.4.1.1"
+
+    refused = await admin_client.post(
+        "/witsml",
+        content=envelope("WMLS_GetVersion"),
+        headers={**headers, "accept-encoding": "gzip;q=0, identity"},
+    )
+    assert refused.status_code == 200
+    assert "content-encoding" not in refused.headers
+    assert field(refused, "Result") == "1.4.1.1"
 
 
 async def test_read_outputs_conform_to_official_xsd(

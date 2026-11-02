@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import gzip
 import logging
 import uuid
 
@@ -46,21 +47,25 @@ async def wmls_endpoint(request: Request) -> Response:
     settings = container.settings
 
     if not _is_https(request, settings.require_https, settings.trust_forwarded_proto):
-        return PlainTextResponse(
+        return _respond(
+            request,
             "WMLS requiere HTTPS. El acceso por HTTP sin TLS está deshabilitado.",
             status_code=403,
+            media_type="text/plain; charset=utf-8",
         )
 
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
     if content_type not in SOAP_CONTENT_TYPES:
-        return PlainTextResponse(
+        return _respond(
+            request,
             "Content-Type no soportado; se esperaba SOAP 1.1 XML.",
             status_code=415,
+            media_type="text/plain; charset=utf-8",
         )
 
     credentials = _basic_credentials(request.headers.get("authorization"))
     if credentials is None:
-        return _unauthorized("Se requieren credenciales HTTP Basic.")
+        return _unauthorized(request, "Se requieren credenciales HTTP Basic.")
 
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     payload = await request.body()
@@ -68,7 +73,7 @@ async def wmls_endpoint(request: Request) -> Response:
     try:
         soap_request = parse_soap_request(payload, request.headers.get("soapaction"))
     except SoapEnvelopeError as exc:
-        return _fault(str(exc), status_code=400)
+        return _fault(request, str(exc), status_code=400)
 
     try:
         async with container.request() as services:
@@ -76,7 +81,9 @@ async def wmls_endpoint(request: Request) -> Response:
                 *credentials
             )
             if principal is None:
-                return _unauthorized("Credenciales inválidas o cuenta deshabilitada.")
+                return _unauthorized(
+                    request, "Credenciales inválidas o cuenta deshabilitada."
+                )
             fields = await execute(
                 services.witsml,
                 principal,
@@ -85,17 +92,13 @@ async def wmls_endpoint(request: Request) -> Response:
                 correlation_id,
             )
     except ValidationError as exc:
-        return _fault(str(exc), status_code=400)
+        return _fault(request, str(exc), status_code=400)
     except Exception:  # noqa: BLE001 - se registra sin secretos
         logger.exception("Error no controlado en WMLS (correlación %s)", correlation_id)
-        return _fault("Error interno del servidor WMLS.", status_code=500)
+        return _fault(request, "Error interno del servidor WMLS.", status_code=500)
 
     response = build_response(soap_request.operation, fields)
-    return Response(
-        content=response,
-        media_type="text/xml; charset=utf-8",
-        headers={"X-Correlation-ID": correlation_id},
-    )
+    return _respond(request, response, headers={"X-Correlation-ID": correlation_id})
 
 
 def _is_https(request: Request, require_https: bool, trust_forwarded: bool) -> bool:
@@ -124,17 +127,61 @@ def _basic_credentials(header: str | None) -> tuple[str, str] | None:
     return username, password
 
 
-def _unauthorized(message: str) -> Response:
-    return PlainTextResponse(
+def _unauthorized(request: Request, message: str) -> Response:
+    return _respond(
+        request,
         message,
         status_code=401,
+        media_type="text/plain; charset=utf-8",
         headers={"WWW-Authenticate": 'Basic realm="Sentinel WITSML DataStore"'},
     )
 
 
-def _fault(message: str, *, status_code: int) -> Response:
+def _fault(request: Request, message: str, *, status_code: int) -> Response:
+    return _respond(request, build_fault(message), status_code=status_code)
+
+
+def _respond(
+    request: Request,
+    content: str | bytes,
+    *,
+    status_code: int = 200,
+    media_type: str = "text/xml; charset=utf-8",
+    headers: dict[str, str] | None = None,
+) -> Response:
+    """Respuesta WMLS comprimida con gzip cuando el cliente la acepta (D-01)."""
+    body = content.encode("utf-8") if isinstance(content, str) else content
+    response_headers = dict(headers or {})
+    if _accepts_gzip(request.headers.get("accept-encoding")):
+        body = gzip.compress(body)
+        response_headers["Content-Encoding"] = "gzip"
+        response_headers["Vary"] = "Accept-Encoding"
     return Response(
-        content=build_fault(message),
+        content=body,
         status_code=status_code,
-        media_type="text/xml; charset=utf-8",
+        media_type=media_type,
+        headers=response_headers,
     )
+
+
+def _accepts_gzip(header: str | None) -> bool:
+    """Interpreta ``Accept-Encoding`` respetando ``q=0``."""
+    if not header:
+        return False
+    for item in header.split(","):
+        name, _, parameters = item.partition(";")
+        name = name.strip().lower()
+        if name not in ("gzip", "*"):
+            continue
+        quality = 1.0
+        for parameter in parameters.split(";"):
+            key, _, value = parameter.partition("=")
+            if key.strip().lower() != "q":
+                continue
+            try:
+                quality = float(value)
+            except ValueError:
+                quality = 0.0
+        if quality > 0:
+            return True
+    return False

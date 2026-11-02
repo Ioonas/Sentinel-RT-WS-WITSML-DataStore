@@ -136,7 +136,9 @@ def build_capabilities(config: ServerConfig) -> str:
     etree.SubElement(server, f"{API}supportUomConversion").text = (
         "true" if config.support_uom_conversion else "false"
     )
-    etree.SubElement(server, f"{API}compressionMethod").text = "none"
+    # D-01: no se declara ``compressionMethod``; el elemento describe solo la
+    # compresión de solicitudes, que es opcional. Las respuestas se comprimen
+    # con gzip cuando el cliente lo acepta (ver ``wmls_transport.router``).
 
     for function_name, data_objects in CAPABILITY_FUNCTIONS:
         function = etree.SubElement(server, f"{API}function", name=function_name)
