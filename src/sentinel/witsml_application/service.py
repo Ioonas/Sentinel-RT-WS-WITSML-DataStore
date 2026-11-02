@@ -46,10 +46,15 @@ from sentinel.xml_schema import documents as xd
 from sentinel.xml_schema.objects import WRITABLE_TYPES, spec_for
 from sentinel.xml_schema.parser import parse_xml, serialize
 from sentinel.xml_schema.serializer import (
+    ChangeLogHistoryView,
     ChangeLogView,
     build_capabilities,
     build_change_log,
 )
+
+#: Máximo de filas que se recorren para calcular min/max por curva en una
+#: respuesta ``header-only``. Los logs mayores usan su rango almacenado.
+_HEADER_SAMPLE_LIMIT = 1000
 
 
 class WitsmlStoreService:
@@ -150,8 +155,10 @@ class WitsmlStoreService:
     ) -> StoreResult:
         spec_for(object_type)
         options = xd.parse_options(options_xml)
-        if options.return_elements not in (
+        mode = options.return_elements
+        if mode not in (
             "all",
+            "requested",
             "header-only",
             "id-only",
             "data-only",
@@ -160,14 +167,40 @@ class WitsmlStoreService:
         ):
             raise WitsmlError(
                 WmlsCode.INVALID_KEYWORD_VALUE,
-                f"returnElements no soportado: {options.return_elements}",
+                f"returnElements no soportado: {mode}",
             )
+        growing = object_type in ("log", "trajectory")
+        if mode in ("header-only", "data-only") and not growing:
+            raise WitsmlError(WmlsCode.INVALID_OPTION_FOR_GROWING_ONLY)
+        if mode == "station-location-only" and object_type != "trajectory":
+            raise WitsmlError(WmlsCode.INVALID_OPTION_FOR_GROWING_ONLY)
+        if mode == "latest-change-only":
+            raise WitsmlError(WmlsCode.INVALID_OPTION_FOR_CHANGELOG)
         queries = xd.parse_queries(query_xml, object_type)
         config = await self._config.get()
         container = xd.new_container(object_type)
         partial = False
         budget = config.max_data_nodes
         readable_wells = principal.readable_wells
+
+        if options.request_object_selection:
+            records = await self._repository(object_type).list(
+                ListFilter(allowed_wells=readable_wells, limit=1)
+            )
+            for record in records[:1]:
+                element = parse_xml(record.xml)
+                xd.ensure_namespace(element)
+                xd.apply_server_fields(
+                    element,
+                    created_at=record.created_at,
+                    changed_at=record.changed_at,
+                    growing=record.growing_until is not None
+                    and record.growing_until > self._clock.now(),
+                )
+                container.append(xd.apply_selection_capability(element))
+            return StoreResult(
+                code=int(WmlsCode.SUCCESS), xml_out=serialize(container)
+            )
 
         for query in queries:
             if not principal.allows_witsml(WitsmlAction.READ, object_type, query.uid_well):
@@ -184,9 +217,19 @@ class WitsmlStoreService:
                     name=query.text_filters.get("name"),
                     text_filters=query.text_filters,
                     allowed_wells=readable_wells,
+                    created_after=query.created_after,
+                    changed_after=query.changed_after,
                 )
             )
+            now = self._clock.now()
             for record in records:
+                if query.object_growing is not None:
+                    actual = (
+                        record.growing_until is not None
+                        and record.growing_until > now
+                    )
+                    if actual != query.object_growing:
+                        continue
                 if budget <= 0:
                     partial = True
                     break
@@ -203,7 +246,7 @@ class WitsmlStoreService:
         code = int(WmlsCode.PARTIAL_SUCCESS if partial else WmlsCode.SUCCESS)
         supp = (
             xd.make_supp_msg(
-                [], ["La respuesta fue truncada por maxDataNodes/maxDataPoints."]
+                [], ["Response truncated by maxDataNodes/maxDataPoints."]
             )
             if partial
             else None
@@ -230,9 +273,10 @@ class WitsmlStoreService:
         )
         truncated = False
         used = 1
-        wants_data = options.return_elements not in ("header-only", "id-only")
+        mode = options.return_elements
+        wants_data = mode not in ("header-only", "id-only")
 
-        if isinstance(record, LogRecord) and wants_data:
+        if isinstance(record, LogRecord):
             latest = query.latest_values or options.request_latest_values
             if latest is not None and (
                 latest <= 0 or latest > config.max_request_latest_values
@@ -242,31 +286,63 @@ class WitsmlStoreService:
                     "requestLatestValues debe estar entre 1 y "
                     f"{config.max_request_latest_values}.",
                 )
-            samples = await self._logs.list_samples(
-                record.uid,
-                start=query.start_index,
-                end=query.end_index,
-                latest=latest,
-            )
             curve_count = max(1, len(record.curves))
-            allowed_by_points = max(0, config.max_data_points // curve_count)
-            allowed = min(budget, allowed_by_points)
-            if len(samples) > allowed:
-                samples = samples[:allowed]
-                truncated = True
+            allowed = max(0, min(budget, config.max_data_points // curve_count))
+            if options.max_return_nodes is not None:
+                allowed = min(allowed, options.max_return_nodes)
+
+            samples: list[LogSample]
+            if latest is not None:
+                all_samples = await self._logs.list_samples(record.uid)
+                samples = self._latest_rows(record, all_samples, latest)
+                if len(samples) > allowed:
+                    samples = samples[:allowed]
+                    truncated = True
+            elif wants_data:
+                samples = await self._logs.list_samples(
+                    record.uid,
+                    start=query.start_index,
+                    end=query.end_index,
+                    limit=allowed,
+                )
+                if len(samples) >= allowed and allowed > 0:
+                    total = await self._logs.count_samples(
+                        record.uid, start=query.start_index, end=query.end_index
+                    )
+                    truncated = total > len(samples)
+            else:
+                # Los encabezados pequeños se validan también por curva (prueba
+                # 76a). Los logs masivos usan el rango almacenado para no
+                # recorrer todas sus filas en cada SQ-010.
+                total = await self._logs.count_samples(record.uid)
+                if total <= _HEADER_SAMPLE_LIMIT:
+                    samples = await self._logs.list_samples(record.uid)
+                else:
+                    samples = []
+
+            if samples:
+                start_value, end_value = self._sample_bounds(record, samples)
+            else:
+                start_value, end_value = await self._stored_range(record)
+            self._apply_log_header(
+                record, element, start_value, end_value
+            )
+            self._set_log_curve_ranges(
+                record, element, samples, start_value, end_value
+            )
+            if wants_data:
+                log_data = self._build_log_data(record, samples)
+                for old in xd.children(element, "logData"):
+                    element.remove(old)
+                xd.append_group_child(element, log_data)
             used = len(samples) or 1
-            log_data = self._build_log_data(record, samples)
-            for old in xd.children(element, "logData"):
-                element.remove(old)
-            xd.append_group_child(element, log_data)
-            if truncated and samples:
-                last = samples[-1]
-                self._set_range_end(element, record, last)
         elif isinstance(record, TrajectoryRecord) and wants_data:
             stations = await self._trajectories.list_stations(
                 record.uid, md_min=query.md_min, md_max=query.md_max
             )
             allowed = max(0, budget)
+            if options.max_return_nodes is not None:
+                allowed = min(allowed, options.max_return_nodes)
             if len(stations) > allowed:
                 stations = stations[:allowed]
                 truncated = True
@@ -277,8 +353,239 @@ class WitsmlStoreService:
                 station_element = parse_xml(station.xml)
                 xd.ensure_namespace(station_element)
                 xd.append_group_child(element, station_element)
+            if stations:
+                self._apply_trajectory_header(record, element, stations)
+        elif isinstance(record, TrajectoryRecord):
+            for old in xd.children(element, "trajectoryStation"):
+                element.remove(old)
+            self._apply_trajectory_header(record, element, [])
 
-        return xd.apply_return_elements(element, options.return_elements), used, truncated
+        return (
+            xd.apply_return_elements(
+                element, options.return_elements, query.selection_items
+            ),
+            used,
+            truncated,
+        )
+
+    @staticmethod
+    def _sample_index(record: LogRecord, sample: LogSample) -> Any:
+        return (
+            sample.index_time
+            if record.index_type == "time"
+            else sample.index_value
+        )
+
+    @classmethod
+    def _sample_bounds(
+        cls, record: LogRecord, samples: list[LogSample]
+    ) -> tuple[Any, Any]:
+        indices = [
+            cls._sample_index(record, sample)
+            for sample in samples
+            if cls._sample_index(record, sample) is not None
+        ]
+        if not indices:
+            return None, None
+        low, high = min(indices), max(indices)
+        if record.direction == "decreasing":
+            return high, low
+        return low, high
+
+    async def _stored_range(
+        self, record: LogRecord
+    ) -> tuple[Any, Any]:
+        if record.start_index is not None and record.end_index is not None:
+            return record.start_index, record.end_index
+        low, high = await self._logs.sample_range(record.uid)
+        if record.direction == "decreasing":
+            return high, low
+        return low, high
+
+    @classmethod
+    def _apply_log_header(
+        cls,
+        record: LogRecord,
+        element: etree._Element,
+        start_value: Any,
+        end_value: Any,
+    ) -> None:
+        is_time = record.index_type == "time"
+        for name in (
+            "startIndex",
+            "endIndex",
+            "startDateTimeIndex",
+            "endDateTimeIndex",
+        ):
+            for old in xd.children(element, name):
+                element.remove(old)
+        if is_time:
+            if start_value is not None:
+                xd.set_ordered_child_text(
+                    element,
+                    "startDateTimeIndex",
+                    xd.format_index_value(start_value),
+                )
+            if end_value is not None:
+                xd.set_ordered_child_text(
+                    element,
+                    "endDateTimeIndex",
+                    xd.format_index_value(end_value),
+                )
+        else:
+            if start_value is not None:
+                xd.set_ordered_child_text(
+                    element,
+                    "startIndex",
+                    xd.format_index_value(start_value),
+                    uom=record.index_uom,
+                )
+            if end_value is not None:
+                xd.set_ordered_child_text(
+                    element,
+                    "endIndex",
+                    xd.format_index_value(end_value),
+                    uom=record.index_uom,
+                )
+
+    @classmethod
+    def _set_log_curve_ranges(
+        cls,
+        record: LogRecord,
+        element: etree._Element,
+        samples: list[LogSample],
+        start_value: Any,
+        end_value: Any,
+    ) -> None:
+        is_time = record.index_type == "time"
+        by_mnemonic = {
+            xd.text_of(item, "mnemonic"): item
+            for item in xd.children(element, "logCurveInfo")
+        }
+        for curve in record.curves:
+            curve_element = by_mnemonic.get(curve.mnemonic)
+            if curve_element is None:
+                continue
+            for name in (
+                "minIndex",
+                "maxIndex",
+                "minDateTimeIndex",
+                "maxDateTimeIndex",
+            ):
+                for old in xd.children(curve_element, name):
+                    curve_element.remove(old)
+            indices: list[Any] = []
+            for sample in samples:
+                if curve.is_index or curve.mnemonic == record.index_curve:
+                    index = cls._sample_index(record, sample)
+                else:
+                    value = sample.values.get(curve.mnemonic)
+                    if value is None or value == "":
+                        continue
+                    index = cls._sample_index(record, sample)
+                if index is not None:
+                    indices.append(index)
+            if not indices:
+                if start_value is None or end_value is None:
+                    continue
+                indices = [start_value, end_value]
+            low = min(indices)
+            high = max(indices)
+            if is_time:
+                xd.set_ordered_child_text(
+                    curve_element,
+                    "minDateTimeIndex",
+                    xd.format_index_value(low),
+                    order=xd._LOG_CURVE_CHILD_ORDER,
+                )
+                xd.set_ordered_child_text(
+                    curve_element,
+                    "maxDateTimeIndex",
+                    xd.format_index_value(high),
+                    order=xd._LOG_CURVE_CHILD_ORDER,
+                )
+            else:
+                xd.set_ordered_child_text(
+                    curve_element,
+                    "minIndex",
+                    xd.format_index_value(low),
+                    uom=record.index_uom,
+                    order=xd._LOG_CURVE_CHILD_ORDER,
+                )
+                xd.set_ordered_child_text(
+                    curve_element,
+                    "maxIndex",
+                    xd.format_index_value(high),
+                    uom=record.index_uom,
+                    order=xd._LOG_CURVE_CHILD_ORDER,
+                )
+
+    @classmethod
+    def _apply_trajectory_header(
+        cls,
+        record: TrajectoryRecord,
+        element: etree._Element,
+        stations: list[TrajectoryStation],
+    ) -> None:
+        values = [station.md for station in stations if station.md is not None]
+        if values:
+            md_min, md_max = min(values), max(values)
+        else:
+            md_min, md_max = record.md_min, record.md_max
+        if md_min is None or md_max is None:
+            return
+        xd.set_ordered_child_text(
+            element, "mdMn", xd.format_index_value(md_min), uom=record.md_uom,
+            order=xd._TRAJECTORY_CHILD_ORDER,
+        )
+        xd.set_ordered_child_text(
+            element, "mdMx", xd.format_index_value(md_max), uom=record.md_uom,
+            order=xd._TRAJECTORY_CHILD_ORDER,
+        )
+
+    @classmethod
+    def _latest_rows(
+        cls, record: LogRecord, samples: list[LogSample], latest: int
+    ) -> list[LogSample]:
+        """Filas sintéticas con los últimos ``latest`` valores de cada curva."""
+        curves = [curve.mnemonic for curve in record.curves if not curve.is_index]
+        if not curves:
+            curves = [
+                key
+                for key in (samples[0].values if samples else {})
+                if key != record.index_curve
+            ]
+        merged: dict[Any, LogSample] = {}
+        for mnemonic in curves:
+            matches = [
+                sample
+                for sample in samples
+                if sample.values.get(mnemonic) not in (None, "")
+            ]
+            for sample in matches[-latest:]:
+                index = cls._sample_index(record, sample)
+                if index is None:
+                    continue
+                current = merged.get(index)
+                if current is None:
+                    current = LogSample(
+                        order=0,
+                        index_time=sample.index_time,
+                        index_value=sample.index_value,
+                        values={},
+                    )
+                    merged[index] = current
+                current.values[mnemonic] = sample.values.get(mnemonic)
+        rows = sorted(
+            merged.values(),
+            key=lambda item: item.index_time
+            if item.index_time is not None
+            else item.index_value,
+            reverse=record.direction == "decreasing",
+        )
+        for order, row in enumerate(rows):
+            row.order = order
+        return rows
 
     @staticmethod
     def _build_log_data(record: LogRecord, samples: list[LogSample]) -> etree._Element:
@@ -320,14 +627,6 @@ class WitsmlStoreService:
             rows.append(row)
         return xd.build_log_data(mnemonics, units, rows)
 
-    @staticmethod
-    def _set_range_end(
-        element: etree._Element, record: LogRecord, sample: LogSample
-    ) -> None:
-        name = "endDateTimeIndex" if record.index_type == "time" else "endIndex"
-        value = sample.index_time if record.index_type == "time" else sample.index_value
-        xd.set_child_text(element, name, xd.format_index_value(value))
-
     async def _get_change_log(
         self,
         principal: Principal,
@@ -338,44 +637,131 @@ class WitsmlStoreService:
         if not self._can_read_change_log(principal):
             raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
         options = xd.parse_options(options_xml)
+        latest_only = options.return_elements == "latest-change-only"
         queries = xd.parse_queries(query_xml, "changeLog")
-        records: list[ChangeLogRecord] = []
+        merged: dict[
+            tuple[str, str, str | None, str | None], list[ChangeLogRecord]
+        ] = {}
         for query in queries:
-            records.extend(
-                await self._change_log.search(
-                    object_type=query.object_type,
-                    uid=query.uid,
-                    uid_well=query.uid_well,
-                    uid_wellbore=query.uid_wellbore,
-                    change_type=query.change_type,
-                    start=query.start_index if isinstance(query.start_index, datetime) else None,
-                    end=query.end_index if isinstance(query.end_index, datetime) else None,
-                    allowed_wells=principal.readable_wells,
+            records = await self._change_log.search(
+                object_type=query.object_type,
+                uid=query.uid,
+                uid_well=query.uid_well,
+                uid_wellbore=query.uid_wellbore,
+                allowed_wells=principal.readable_wells,
+                limit=100_000,
+            )
+            grouped: dict[
+                tuple[str, str, str | None, str | None], list[ChangeLogRecord]
+            ] = {}
+            for record in records:
+                key = (
+                    record.object_type,
+                    record.uid,
+                    record.uid_well,
+                    record.uid_wellbore,
+                )
+                grouped.setdefault(key, []).append(record)
+            for key, items in grouped.items():
+                items.sort(key=lambda item: item.change_date)
+                latest = items[-1]
+                # ``commonData/dTimLastChange`` filtra a nivel de objeto.
+                if (
+                    query.changed_after is not None
+                    and latest.change_date <= query.changed_after
+                ):
+                    continue
+                histories = items
+                if query.start_index is not None:
+                    histories = [
+                        item
+                        for item in histories
+                        if item.change_date > query.start_index
+                    ]
+                if query.change_type:
+                    histories = [
+                        item
+                        for item in histories
+                        if item.change_type == query.change_type
+                    ]
+                if not latest_only and not histories:
+                    continue
+                merged[key] = histories or items
+        views: list[ChangeLogView] = []
+        for items in merged.values():
+            items.sort(key=lambda item: item.change_date)
+            latest = items[-1]
+            current = await self._current_names(
+                latest.object_type, latest.uid, latest.uid_well, latest.uid_wellbore
+            )
+            index_uom = current[3] if current is not None else None
+            histories = ()
+            if not latest_only:
+                histories = tuple(
+                    ChangeLogHistoryView(
+                        change_date=item.change_date,
+                        change_type=item.change_type,
+                        change_info=item.change_info,
+                        start_index=item.start_index,
+                        end_index=item.end_index,
+                        mnemonics=item.mnemonics,
+                        index_uom=index_uom,
+                    )
+                    for item in items
+                )
+            last_type = items[-1].change_type if items else "update"
+            last_info = items[-1].change_info if items else None
+            name_object = self._last_value(items, "name_object")
+            name_well = self._last_value(items, "name_well")
+            name_wellbore = self._last_value(items, "name_wellbore")
+            if current is not None:
+                name_object = current[0] or name_object
+                name_well = current[1] or name_well
+                name_wellbore = current[2] or name_wellbore
+            views.append(
+                ChangeLogView(
+                    uid=latest.uid,
+                    object_type=latest.object_type,
+                    name_object=name_object,
+                    name_well=name_well,
+                    name_wellbore=name_wellbore,
+                    uid_well=latest.uid_well,
+                    uid_wellbore=latest.uid_wellbore,
+                    histories=histories,
+                    last_change_type=last_type,
+                    last_change_info=last_info,
+                    d_tim_last_change=latest.change_date,
+                    include_history=not latest_only,
                 )
             )
-        if options.return_elements == "latest-change-only":
-            latest: dict[tuple[str, str, str | None, str | None], ChangeLogRecord] = {}
-            for record in records:
-                key = (record.object_type, record.uid, record.uid_well, record.uid_wellbore)
-                current = latest.get(key)
-                if current is None or record.change_date > current.change_date:
-                    latest[key] = record
-            records = sorted(latest.values(), key=lambda item: item.change_date)
-        views = [
-            ChangeLogView(
-                uid=record.uid,
-                object_type=record.object_type,
-                change_type=record.change_type,
-                change_date=record.change_date,
-                uid_well=record.uid_well,
-                uid_wellbore=record.uid_wellbore,
-                name_object=record.name_object,
-                name_well=record.name_well,
-                name_wellbore=record.name_wellbore,
+        views.sort(
+            key=lambda item: (
+                item.d_tim_last_change.isoformat() if item.d_tim_last_change else ""
             )
-            for record in records
-        ]
+        )
         return StoreResult(code=int(WmlsCode.SUCCESS), xml_out=build_change_log(views))
+
+    async def _current_names(
+        self,
+        object_type: str,
+        uid: str,
+        uid_well: str | None,
+        uid_wellbore: str | None,
+    ) -> tuple[str | None, str | None, str | None, str | None] | None:
+        if object_type not in WRITABLE_TYPES:
+            return None
+        record = await self._load_existing(object_type, uid, uid_well, uid_wellbore)
+        if record is None:
+            return None
+        element = parse_xml(record.xml)
+        xd.ensure_namespace(element)
+        index_uom = record.index_uom if isinstance(record, LogRecord) else None
+        return (
+            xd.text_of(element, "name"),
+            xd.text_of(element, "nameWell"),
+            xd.text_of(element, "nameWellbore"),
+            index_uom,
+        )
 
     @staticmethod
     def _can_read_change_log(principal: Principal) -> bool:
@@ -440,7 +826,7 @@ class WitsmlStoreService:
         uids: list[str] = []
 
         for element in elements:
-            xd.validate_object_element(object_type, element)
+            xd.validate_object_element(object_type, element, require_uid=False)
             uid_well = xd.attr(element, "uidWell")
             uid_wellbore = xd.attr(element, "uidWellbore")
             if object_type == "well":
@@ -650,13 +1036,14 @@ class WitsmlStoreService:
             merged = xd.merge_header(parse_xml(existing.xml), element)
             xd.strip_server_fields(merged)
             growing_until = existing.growing_until
+            history = ChangeLogHistoryView(change_date=now, change_type="update")
 
             if isinstance(existing, LogRecord):
-                growing_until = await self._update_log(
+                growing_until, history = await self._update_log(
                     existing, element, merged, now, config
                 )
             elif isinstance(existing, TrajectoryRecord):
-                growing_until = await self._update_trajectory(
+                growing_until, history = await self._update_trajectory(
                     existing, element, merged, now, config
                 )
 
@@ -683,6 +1070,10 @@ class WitsmlStoreService:
                     name_object=xd.text_of(merged, "name"),
                     name_well=xd.text_of(merged, "nameWell"),
                     name_wellbore=xd.text_of(merged, "nameWellbore"),
+                    change_info=history.change_info,
+                    mnemonics=history.mnemonics,
+                    start_index=history.start_index,
+                    end_index=history.end_index,
                 )
             )
             uids.append(uid)
@@ -698,18 +1089,19 @@ class WitsmlStoreService:
         merged: etree._Element,
         now: datetime,
         config: Any,
-    ) -> datetime | None:
-        index_type = xd.text_of(incoming, "indexType")
-        if index_type and index_type.lower() != record.index_type:
+    ) -> tuple[datetime | None, ChangeLogHistoryView]:
+        history = ChangeLogHistoryView(change_date=now, change_type="update")
+        index_type = xd.normalize_index_type(xd.text_of(incoming, "indexType"))
+        if index_type and index_type != record.index_type:
             raise WitsmlError(
                 WmlsCode.INPUT_OBJECT_NOT_COMPLIANT,
-                "La dirección/tipo de índice de un log no puede cambiar.",
+                "Log indexType cannot change after creation.",
             )
-        direction = xd.text_of(incoming, "direction")
-        if direction and direction.lower() != record.direction:
+        direction = (xd.text_of(incoming, "direction") or "").strip().lower()
+        if direction and direction != record.direction:
             raise WitsmlError(
                 WmlsCode.INPUT_OBJECT_NOT_COMPLIANT,
-                "La dirección de un log no puede cambiar después de crearlo.",
+                "Log direction cannot change after creation.",
             )
 
         incoming_curves = xd.parse_log_curves(incoming)
@@ -730,17 +1122,17 @@ class WitsmlStoreService:
 
         data = xd.parse_log_data(incoming)
         if not data.rows:
-            return record.growing_until
+            return record.growing_until, history
 
         if not data.units:
             raise WitsmlError(
                 WmlsCode.MISSING_UNIT_LIST,
-                "La actualización de logData requiere unitList.",
+                "The logData update requires unitList.",
             )
         if record.index_curve not in data.mnemonics:
             raise WitsmlError(
                 WmlsCode.INDEX_CURVE_NOT_FOUND,
-                f"mnemonicList debe incluir la curva de índice '{record.index_curve}'.",
+                f"mnemonicList must include the index curve '{record.index_curve}'.",
             )
         if len(set(data.mnemonics)) != len(data.mnemonics):
             raise WitsmlError(WmlsCode.MNEMONICS_NOT_UNIQUE)
@@ -789,17 +1181,35 @@ class WitsmlStoreService:
             is not None
         ]
         if not indices:
-            return record.growing_until
+            return record.growing_until, history
         new_min = min(indices)
         new_max = max(indices)
+        history_mnemonics = ",".join(data.mnemonics) if data.mnemonics else None
+        if record.direction == "decreasing":
+            history_start, history_end = new_max, new_min
+        else:
+            history_start, history_end = new_min, new_max
+        history = ChangeLogHistoryView(
+            change_date=now,
+            change_type="update",
+            mnemonics=history_mnemonics,
+            start_index=xd.format_index_value(history_start),
+            end_index=xd.format_index_value(history_end),
+        )
         starts = [value for value in (old_start, new_min) if value is not None]
         ends = [value for value in (old_end, new_max) if value is not None]
+        old_min = min((value for value in (old_start, old_end) if value is not None), default=None)
+        old_max = max((value for value in (old_start, old_end) if value is not None), default=None)
+        extended = (
+            old_max is None
+            or new_max > old_max
+            or old_min is None
+            or new_min < old_min
+        )
         if record.direction == "increasing":
-            extended = old_end is None or new_max > old_end
             start_value = min(starts)
             end_value = max(ends)
         else:
-            extended = old_end is None or new_min < old_end
             start_value = max(starts)
             end_value = min(ends)
         record.start_index_time = self._as_time(start_value, record.index_type)
@@ -812,8 +1222,8 @@ class WitsmlStoreService:
         }
         if inserted and extended:
             timeout = timedelta(seconds=config.growing_timeout_seconds)
-            return now + timeout
-        return record.growing_until
+            return now + timeout, history
+        return record.growing_until, history
 
     async def _update_trajectory(
         self,
@@ -822,11 +1232,12 @@ class WitsmlStoreService:
         merged: etree._Element,
         now: datetime,
         config: Any,
-    ) -> datetime | None:
+    ) -> tuple[datetime | None, ChangeLogHistoryView]:
+        history = ChangeLogHistoryView(change_date=now, change_type="update")
         header = xd.parse_trajectory_header(incoming)
         new_stations = xd.parse_trajectory_stations(incoming)
         if not new_stations:
-            return record.growing_until
+            return record.growing_until, history
         self._enforce_write_limits(config, len(new_stations), 1)
         existing = await self._trajectories.list_stations(record.uid)
         by_md = {station.md: station for station in existing if station.md is not None}
@@ -848,7 +1259,14 @@ class WitsmlStoreService:
             station.order = order
         await self._trajectories.replace_stations(record.uid, stations)
         md_min, md_max = self._md_range(stations)
-        extended = record.md_max is None or (md_max is not None and md_max > record.md_max)
+        extended = record.md_max is None or (
+            (md_max is not None and md_max > record.md_max)
+            or (
+                md_min is not None
+                and record.md_min is not None
+                and md_min < record.md_min
+            )
+        )
         record.md_min = md_min
         record.md_max = md_max
         record.md_uom = header.md_uom or record.md_uom
@@ -857,8 +1275,8 @@ class WitsmlStoreService:
             "mdMx": xd.format_index_value(md_max),
         }
         if appended and extended:
-            return now + timedelta(seconds=config.growing_timeout_seconds)
-        return record.growing_until
+            return now + timedelta(seconds=config.growing_timeout_seconds), history
+        return record.growing_until, history
 
     # ------------------------------------------------------------------
     # DeleteFromStore
@@ -902,52 +1320,147 @@ class WitsmlStoreService:
     ) -> StoreResult:
         if object_type not in WRITABLE_TYPES:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
-        queries = xd.parse_queries(query_xml, object_type)
+        root = parse_xml(query_xml)
+        xd.ensure_namespace(root)
+        spec = spec_for(object_type)
+        elements = [item for item in root if xd.localname(item) == spec.name]
+        if not elements:
+            raise WitsmlError(WmlsCode.MISSING_UID)
         now = self._clock.now()
         deleted = 0
-        for query in queries:
-            if not query.uid:
+        modified = 0
+        for element in elements:
+            uid = xd.normalize_uid(xd.attr(element, "uid"))
+            if not uid:
                 raise WitsmlError(WmlsCode.MISSING_UID)
+            uid_well = xd.attr(element, "uidWell")
+            uid_wellbore = xd.attr(element, "uidWellbore")
+            if object_type == "well":
+                uid_well = uid
             if not principal.allows_witsml(
-                WitsmlAction.DELETE, object_type, query.uid_well
+                WitsmlAction.DELETE, object_type, uid_well
             ):
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
             existing = await self._load_existing(
-                object_type, query.uid, query.uid_well, query.uid_wellbore
+                object_type, uid, uid_well, uid_wellbore
             )
             if existing is None:
                 raise WitsmlError(WmlsCode.OBJECT_NOT_EXIST)
-            deleted_element = parse_xml(existing.xml)
-            xd.ensure_namespace(deleted_element)
-            await self._assert_no_children(object_type, existing)
-            if object_type == "well":
-                await self._wells.delete(query.uid)
-            elif object_type == "wellbore":
-                await self._wellbores.delete(query.uid, query.uid_well)
-            elif object_type == "log":
-                await self._logs.delete(query.uid, query.uid_well, query.uid_wellbore)
-            else:
-                await self._trajectories.delete(
-                    query.uid, query.uid_well, query.uid_wellbore
+
+            stored = parse_xml(existing.xml)
+            xd.ensure_namespace(stored)
+            attribute_changed = xd.apply_attribute_deletions(stored, element)
+            curve_mnemonics = [
+                mnemonic
+                for item in xd.children(element, "logCurveInfo")
+                if (mnemonic := (xd.text_of(item, "mnemonic") or xd.attr(item, "uid")))
+            ]
+            start, end = xd.index_bounds(element)
+            has_range = xd.has_index_bounds(element)
+            is_log = isinstance(existing, LogRecord)
+            partial = attribute_changed or (is_log and (curve_mnemonics or has_range))
+
+            if not partial:
+                deleted_element = stored
+                await self._assert_no_children(object_type, existing)
+                if object_type == "well":
+                    await self._wells.delete(uid)
+                elif object_type == "wellbore":
+                    await self._wellbores.delete(uid, uid_well)
+                elif object_type == "log":
+                    await self._logs.delete(uid, uid_well, uid_wellbore)
+                else:
+                    await self._trajectories.delete(uid, uid_well, uid_wellbore)
+                await self._change_log.add(
+                    ChangeLogRecord(
+                        uid=uid,
+                        object_type=object_type,
+                        change_type="delete",
+                        change_date=now,
+                        uid_well=uid_well,
+                        uid_wellbore=uid_wellbore,
+                        name_object=xd.text_of(deleted_element, "name"),
+                        name_well=xd.text_of(deleted_element, "nameWell"),
+                        name_wellbore=xd.text_of(deleted_element, "nameWellbore"),
+                    )
                 )
+                deleted += 1
+                continue
+
+            if is_log:
+                record = existing  # type: ignore[assignment]
+                assert isinstance(record, LogRecord)
+                if curve_mnemonics:
+                    for mnemonic in curve_mnemonics:
+                        await self._logs.remove_curve_values(
+                            uid, mnemonic, start=start, end=end
+                        )
+                    if not has_range:
+                        # Sin rango: se elimina la curva por completo.
+                        record.curves = [
+                            curve
+                            for curve in record.curves
+                            if curve.mnemonic not in curve_mnemonics
+                        ]
+                        await self._logs.replace_curves(uid, record.curves)
+                        for item in list(xd.children(stored, "logCurveInfo")):
+                            if (
+                                xd.text_of(item, "mnemonic") in curve_mnemonics
+                                or xd.attr(item, "uid") in curve_mnemonics
+                            ):
+                                stored.remove(item)
+                elif has_range:
+                    await self._logs.delete_samples(uid, start=start, end=end)
+                await self._refresh_log_range(record)
+
+            fields = self._fields_for(object_type, stored)
+            existing.xml = serialize(stored)
+            existing.changed_at = now
+            existing.fields = fields
+            existing.name = xd.text_of(stored, "name")
+            await self._update_repository(object_type, existing)
+
+            start_text = xd.format_index_value(start) if start is not None else None
+            end_text = xd.format_index_value(end) if end is not None else None
             await self._change_log.add(
                 ChangeLogRecord(
-                    uid=query.uid,
+                    uid=uid,
                     object_type=object_type,
-                    change_type="delete",
+                    change_type="update",
                     change_date=now,
-                    uid_well=query.uid_well,
-                    uid_wellbore=query.uid_wellbore,
-                    name_object=xd.text_of(deleted_element, "name"),
-                    name_well=xd.text_of(deleted_element, "nameWell"),
-                    name_wellbore=xd.text_of(deleted_element, "nameWellbore"),
+                    uid_well=uid_well,
+                    uid_wellbore=uid_wellbore,
+                    name_object=xd.text_of(stored, "name"),
+                    name_well=xd.text_of(stored, "nameWell"),
+                    name_wellbore=xd.text_of(stored, "nameWellbore"),
+                    mnemonics=",".join(curve_mnemonics) if curve_mnemonics else None,
+                    start_index=start_text,
+                    end_index=end_text,
                 )
             )
-            deleted += 1
+            modified += 1
+        total = deleted + modified
         return StoreResult(
             code=int(WmlsCode.SUCCESS),
-            supp_msg=xd.make_supp_msg([], [f"{deleted} objeto(s) eliminado(s)."]),
+            supp_msg=xd.make_supp_msg([], [f"{total} object(s) deleted."]),
         )
+
+    async def _refresh_log_range(self, record: LogRecord) -> None:
+        low, high = await self._logs.sample_range(record.uid)
+        if low is None or high is None:
+            return
+        if record.direction == "decreasing":
+            start_value, end_value = high, low
+        else:
+            start_value, end_value = low, high
+        record.start_index_time = self._as_time(start_value, record.index_type)
+        record.start_index_value = self._as_decimal(start_value, record.index_type)
+        record.end_index_time = self._as_time(end_value, record.index_type)
+        record.end_index_value = self._as_decimal(end_value, record.index_type)
+        record.fields = dict(record.fields) | {
+            "startIndex": xd.format_index_value(record.start_index),
+            "endIndex": xd.format_index_value(record.end_index),
+        }
 
     # ------------------------------------------------------------------
     # Utilidades internas
@@ -1026,7 +1539,7 @@ class WitsmlStoreService:
             if raw_index is None:
                 raise WitsmlError(
                     WmlsCode.INDEX_CURVE_NOT_FOUND,
-                    f"Fila sin valor para la curva de índice '{header.index_curve}'.",
+                    f"Row without value for index curve '{header.index_curve}'.",
                 )
             index = xd.parse_index_value(raw_index, header.index_type)
             values = {
@@ -1063,7 +1576,10 @@ class WitsmlStoreService:
         present = [value for value in indices if value is not None]
         if not present:
             return header.start_index, header.end_index
-        return min(present), max(present)
+        low, high = min(present), max(present)
+        if header.direction == "decreasing":
+            return high, low
+        return low, high
 
     @staticmethod
     def _stations_from_element(
@@ -1105,7 +1621,7 @@ class WitsmlStoreService:
         if nodes > config.max_data_nodes or nodes * curves > config.max_data_points:
             raise WitsmlError(
                 WmlsCode.MAX_DATA_EXCEEDED,
-                f"La solicitud excede maxDataNodes={config.max_data_nodes} o "
+                f"Request exceeds maxDataNodes={config.max_data_nodes} or "
                 f"maxDataPoints={config.max_data_points}.",
             )
 
@@ -1116,6 +1632,14 @@ class WitsmlStoreService:
     @staticmethod
     def _as_decimal(value: Any, index_type: str) -> Decimal | None:
         return value if index_type != "time" and isinstance(value, Decimal) else None
+
+    @staticmethod
+    def _last_value(items: list[Any], attribute: str) -> str | None:
+        for item in reversed(items):
+            value = getattr(item, attribute)
+            if value:
+                return value
+        return None
 
     async def _record_audit(
         self,

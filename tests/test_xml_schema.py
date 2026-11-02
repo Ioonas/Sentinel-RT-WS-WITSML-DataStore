@@ -12,6 +12,7 @@ from sentinel.xml_schema import documents as xd
 from sentinel.xml_schema.namespaces import WITSML_NS
 from sentinel.xml_schema.parser import parse_xml, serialize
 from sentinel.xml_schema.serializer import (
+    ChangeLogHistoryView,
     ChangeLogView,
     build_capabilities,
     build_change_log,
@@ -95,20 +96,60 @@ def test_capabilities_use_server_config() -> None:
 
 
 def test_change_log_serialization() -> None:
+    changed = datetime(2026, 10, 31, tzinfo=UTC)
     xml = build_change_log(
         [
             ChangeLogView(
                 uid="w-1",
                 object_type="well",
-                change_type="add",
-                change_date=datetime(2026, 10, 31, tzinfo=UTC),
                 name_object="Well One",
+                histories=(
+                    ChangeLogHistoryView(
+                        change_date=changed,
+                        change_type="update",
+                        start_index="1",
+                        end_index="4",
+                        mnemonics="BDEP,CURVE3",
+                        index_uom="m",
+                    ),
+                ),
+                last_change_type="update",
+                d_tim_last_change=changed,
             )
         ]
     )
-    assert "<lastChangeType>add</lastChangeType>" in xml
+    assert "<lastChangeType>update</lastChangeType>" in xml
     assert "<nameObject>Well One</nameObject>" in xml
     assert "<objectType>well</objectType>" in xml
     assert 'uidObject="w-1"' in xml
+    assert 'uom="m"' in xml
+    assert "<mnemonics>BDEP,CURVE3</mnemonics>" in xml
+    assert "changeHistory uid=" in xml
+    assert xml.index("<lastChangeType>") < xml.index("<changeHistory uid=")
+    assert xml.index("<changeType>update</changeType>") < xml.index("<commonData>")
     document = parse_xml(xml)
     LxmlXsdValidator().validate_document("changeLog", document, operation="read")
+    LxmlXsdValidator().validate_document("changeLog", document, operation="write")
+
+
+def test_parse_log_data_accepts_repeated_data_elements() -> None:
+    root = parse_xml(
+        f'<logs xmlns="{WITSML_NS}"><log uid="l" uidWell="w" uidWellbore="wb">'
+        "<indexType>date time</indexType><indexCurve>TIME</indexCurve>"
+        "<logData><mnemonicList>TIME,C1</mnemonicList>"
+        "<unitList>unitless,m</unitList>"
+        "<data>2026-10-30T00:00:00.000Z,1</data>"
+        "<data>2026-10-30T00:00:01.000Z,2</data></logData>"
+        "</log></logs>"
+    )
+    block = xd.parse_log_data(root[0])
+    assert block.mnemonics == ["TIME", "C1"]
+    assert [row["C1"] for row in block.rows] == ["1", "2"]
+
+
+def test_build_log_data_emits_one_data_element_per_row() -> None:
+    log_data = xd.build_log_data(["TIME", "C1"], ["unitless", "m"], [["1", "2"], ["3", "4"]])
+    assert [item.text for item in log_data if xd.localname(item) == "data"] == [
+        "1,2",
+        "3,4",
+    ]

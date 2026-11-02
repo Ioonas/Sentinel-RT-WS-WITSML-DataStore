@@ -162,22 +162,36 @@ def _to_trajectory(row: TrajectoryRow) -> TrajectoryRecord:
 
 def _apply_text_filters(stmt: Any, model: Any, filters: ListFilter) -> Any:
     if filters.uid:
-        stmt = stmt.where(model.uid == filters.uid)
+        stmt = stmt.where(func.lower(model.uid) == filters.uid.lower())
     if filters.uid_well:
-        stmt = stmt.where(model.uid_well == filters.uid_well)
+        stmt = stmt.where(func.lower(model.uid_well) == filters.uid_well.lower())
     if filters.uid_wellbore:
-        stmt = stmt.where(model.uid_wellbore == filters.uid_wellbore)
+        stmt = stmt.where(
+            func.lower(model.uid_wellbore) == filters.uid_wellbore.lower()
+        )
     if filters.name:
         stmt = stmt.where(func.lower(model.name) == filters.name.lower())
     for key, value in filters.text_filters.items():
         if key == "name":
             continue
         stmt = stmt.where(func.lower(model.fields[key].astext) == value.lower())
+    if filters.created_after is not None:
+        stmt = stmt.where(model.d_tim_creation > filters.created_after)
+    if filters.changed_after is not None:
+        stmt = stmt.where(model.d_tim_last_change > filters.changed_after)
     if filters.allowed_wells is not None:
         if model is WellRow:
-            stmt = stmt.where(model.uid.in_(filters.allowed_wells))
+            stmt = stmt.where(
+                func.lower(model.uid).in_(
+                    {value.lower() for value in filters.allowed_wells}
+                )
+            )
         else:
-            stmt = stmt.where(model.uid_well.in_(filters.allowed_wells))
+            stmt = stmt.where(
+                func.lower(model.uid_well).in_(
+                    {value.lower() for value in filters.allowed_wells}
+                )
+            )
     return stmt
 
 
@@ -186,7 +200,9 @@ class SqlAlchemyWellRepository:
         self._session = session
 
     async def get(self, uid: str, uid_well: str | None = None) -> WellRecord | None:
-        row = await self._session.scalar(select(WellRow).where(WellRow.uid == uid))
+        row = await self._session.scalar(
+            select(WellRow).where(func.lower(WellRow.uid) == uid.lower())
+        )
         return _to_well(row) if row else None
 
     async def list(self, filters: ListFilter) -> list[WellRecord]:
@@ -210,11 +226,15 @@ class SqlAlchemyWellRepository:
         _apply_common(row, record)
 
     async def delete(self, uid: str) -> None:
-        await self._session.execute(delete(WellRow).where(WellRow.uid == uid))
+        await self._session.execute(
+            delete(WellRow).where(func.lower(WellRow.uid) == uid.lower())
+        )
 
     async def has_children(self, uid: str) -> bool:
         exists = await self._session.scalar(
-            select(WellboreRow.id).where(WellboreRow.uid_well == uid).limit(1)
+            select(WellboreRow.id)
+            .where(func.lower(WellboreRow.uid_well) == uid.lower())
+            .limit(1)
         )
         return exists is not None
 
@@ -226,9 +246,9 @@ class SqlAlchemyWellboreRepository:
     async def get(
         self, uid: str, uid_well: str | None = None
     ) -> WellboreRecord | None:
-        stmt = select(WellboreRow).where(WellboreRow.uid == uid)
+        stmt = select(WellboreRow).where(func.lower(WellboreRow.uid) == uid.lower())
         if uid_well:
-            stmt = stmt.where(WellboreRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(WellboreRow.uid_well) == uid_well.lower())
         row = await self._session.scalar(stmt)
         return _to_wellbore(row) if row else None
 
@@ -257,16 +277,18 @@ class SqlAlchemyWellboreRepository:
         _apply_common(row, record)
 
     async def delete(self, uid: str, uid_well: str | None = None) -> None:
-        stmt = delete(WellboreRow).where(WellboreRow.uid == uid)
+        stmt = delete(WellboreRow).where(func.lower(WellboreRow.uid) == uid.lower())
         if uid_well:
-            stmt = stmt.where(WellboreRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(WellboreRow.uid_well) == uid_well.lower())
         await self._session.execute(stmt)
 
     async def has_children(self, uid: str, uid_well: str | None = None) -> bool:
         for model in (LogRow, TrajectoryRow):
-            stmt = select(model.id).where(model.uid_wellbore == uid)
+            stmt = select(model.id).where(
+                func.lower(model.uid_wellbore) == uid.lower()
+            )
             if uid_well:
-                stmt = stmt.where(model.uid_well == uid_well)
+                stmt = stmt.where(func.lower(model.uid_well) == uid_well.lower())
             if await self._session.scalar(stmt.limit(1)) is not None:
                 return True
         return False
@@ -282,12 +304,12 @@ class SqlAlchemyLogRepository:
         stmt = (
             select(LogRow)
             .options(selectinload(LogRow.curves))
-            .where(LogRow.uid == uid)
+            .where(func.lower(LogRow.uid) == uid.lower())
         )
         if uid_well:
-            stmt = stmt.where(LogRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(LogRow.uid_well) == uid_well.lower())
         if uid_wellbore:
-            stmt = stmt.where(LogRow.uid_wellbore == uid_wellbore)
+            stmt = stmt.where(func.lower(LogRow.uid_wellbore) == uid_wellbore.lower())
         row = await self._session.scalar(stmt)
         return _to_log(row) if row else None
 
@@ -341,17 +363,44 @@ class SqlAlchemyLogRepository:
     async def delete(
         self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
     ) -> None:
-        stmt = select(LogRow.id).where(LogRow.uid == uid)
+        stmt = select(LogRow.id).where(func.lower(LogRow.uid) == uid.lower())
         if uid_well:
-            stmt = stmt.where(LogRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(LogRow.uid_well) == uid_well.lower())
         if uid_wellbore:
-            stmt = stmt.where(LogRow.uid_wellbore == uid_wellbore)
+            stmt = stmt.where(func.lower(LogRow.uid_wellbore) == uid_wellbore.lower())
         log_id = await self._session.scalar(stmt)
         if log_id is None:
             return
         await self._session.execute(delete(LogSampleRow).where(LogSampleRow.log_id == log_id))
         await self._session.execute(delete(LogCurveRow).where(LogCurveRow.log_id == log_id))
         await self._session.execute(delete(LogRow).where(LogRow.id == log_id))
+
+    async def _log_id(self, log_uid: str) -> int | None:
+        return await self._session.scalar(
+            select(LogRow.id).where(func.lower(LogRow.uid) == log_uid.lower())
+        )
+
+    def _range_conditions(
+        self,
+        stmt: Any,
+        start: datetime | Decimal | None,
+        end: datetime | Decimal | None,
+    ) -> Any:
+        if start is None and end is None:
+            return stmt
+        if isinstance(start, datetime) or isinstance(end, datetime):
+            lo, hi = self._ordered(start, end)
+            if lo is not None:
+                stmt = stmt.where(LogSampleRow.index_time >= lo)
+            if hi is not None:
+                stmt = stmt.where(LogSampleRow.index_time <= hi)
+        else:
+            lo, hi = self._ordered(start, end)
+            if lo is not None:
+                stmt = stmt.where(LogSampleRow.index_value >= lo)
+            if hi is not None:
+                stmt = stmt.where(LogSampleRow.index_value <= hi)
+        return stmt
 
     async def list_samples(
         self,
@@ -360,10 +409,9 @@ class SqlAlchemyLogRepository:
         start: datetime | Decimal | None = None,
         end: datetime | Decimal | None = None,
         latest: int | None = None,
+        limit: int | None = None,
     ) -> list[LogSample]:
-        log_id = await self._session.scalar(
-            select(LogRow.id).where(LogRow.uid == log_uid)
-        )
+        log_id = await self._log_id(log_uid)
         if log_id is None:
             return []
         stmt = select(LogSampleRow).where(LogSampleRow.log_id == log_id)
@@ -372,29 +420,98 @@ class SqlAlchemyLogRepository:
             rows = list((await self._session.scalars(stmt)).all())
             rows.reverse()
             return [self._to_sample(row) for row in rows]
-        if start is not None or end is not None:
-            if isinstance(start, datetime) or isinstance(end, datetime):
-                lo, hi = self._ordered(start, end)
-                if lo is not None:
-                    stmt = stmt.where(LogSampleRow.index_time >= lo)
-                if hi is not None:
-                    stmt = stmt.where(LogSampleRow.index_time <= hi)
-            else:
-                lo, hi = self._ordered(start, end)
-                if lo is not None:
-                    stmt = stmt.where(LogSampleRow.index_value >= lo)
-                if hi is not None:
-                    stmt = stmt.where(LogSampleRow.index_value <= hi)
+        stmt = self._range_conditions(stmt, start, end)
         stmt = stmt.order_by(LogSampleRow.sample_order)
+        if limit is not None:
+            stmt = stmt.limit(limit)
         rows = (await self._session.scalars(stmt)).all()
         return [self._to_sample(row) for row in rows]
+
+    async def count_samples(
+        self,
+        log_uid: str,
+        *,
+        start: datetime | Decimal | None = None,
+        end: datetime | Decimal | None = None,
+    ) -> int:
+        log_id = await self._log_id(log_uid)
+        if log_id is None:
+            return 0
+        stmt = select(func.count(LogSampleRow.id)).where(
+            LogSampleRow.log_id == log_id
+        )
+        stmt = self._range_conditions(stmt, start, end)
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def sample_range(
+        self, log_uid: str
+    ) -> tuple[datetime | Decimal | None, datetime | Decimal | None]:
+        index_type = await self._session.scalar(
+            select(LogRow.index_type).where(
+                func.lower(LogRow.uid) == log_uid.lower()
+            )
+        )
+        if index_type is None:
+            return None, None
+        log_id = await self._log_id(log_uid)
+        if log_id is None:
+            return None, None
+        low_column = (
+            LogSampleRow.index_time if index_type == "time" else LogSampleRow.index_value
+        )
+        stmt = select(func.min(low_column), func.max(low_column)).where(
+            LogSampleRow.log_id == log_id
+        )
+        result = (await self._session.execute(stmt)).one()
+        low, high = result[0], result[1]
+        if low is None or high is None:
+            return None, None
+        return low, high
+
+    async def delete_samples(
+        self,
+        log_uid: str,
+        *,
+        start: datetime | Decimal | None = None,
+        end: datetime | Decimal | None = None,
+    ) -> int:
+        log_id = await self._log_id(log_uid)
+        if log_id is None:
+            return 0
+        stmt = delete(LogSampleRow).where(LogSampleRow.log_id == log_id)
+        stmt = self._range_conditions(stmt, start, end)
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)
+
+    async def remove_curve_values(
+        self,
+        log_uid: str,
+        mnemonic: str,
+        *,
+        start: datetime | Decimal | None = None,
+        end: datetime | Decimal | None = None,
+    ) -> int:
+        log_id = await self._log_id(log_uid)
+        if log_id is None:
+            return 0
+        stmt = select(LogSampleRow).where(LogSampleRow.log_id == log_id)
+        stmt = self._range_conditions(stmt, start, end)
+        rows = (await self._session.scalars(stmt)).all()
+        changed = 0
+        for row in rows:
+            values = dict(row.values or {})
+            if mnemonic in values:
+                values.pop(mnemonic)
+                row.values = values
+                changed += 1
+        await self._session.flush()
+        return changed
 
     async def upsert_samples(
         self, log_uid: str, samples: list[LogSample], index_type: str
     ) -> tuple[int, int]:
-        log_id = await self._session.scalar(
-            select(LogRow.id).where(LogRow.uid == log_uid)
-        )
+        log_id = await self._log_id(log_uid)
         if log_id is None:
             raise LookupError("log no encontrado para muestras")
         rows = (
@@ -415,7 +532,14 @@ class SqlAlchemyLogRepository:
             current = existing.get(key)
             if current is not None:
                 merged = dict(current.values or {})
-                merged.update(sample.values)
+                # Un valor vacío no borra el dato previamente almacenado.
+                merged.update(
+                    {
+                        mnemonic: value
+                        for mnemonic, value in sample.values.items()
+                        if value not in (None, "")
+                    }
+                )
                 current.values = merged
                 updated += 1
                 continue
@@ -434,9 +558,7 @@ class SqlAlchemyLogRepository:
         return inserted, updated
 
     async def replace_curves(self, log_uid: str, curves: list[LogCurve]) -> None:
-        log_id = await self._session.scalar(
-            select(LogRow.id).where(LogRow.uid == log_uid)
-        )
+        log_id = await self._log_id(log_uid)
         if log_id is None:
             return
         await self._session.execute(delete(LogCurveRow).where(LogCurveRow.log_id == log_id))
@@ -485,11 +607,15 @@ class SqlAlchemyTrajectoryRepository:
     async def get(
         self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
     ) -> TrajectoryRecord | None:
-        stmt = select(TrajectoryRow).where(TrajectoryRow.uid == uid)
+        stmt = select(TrajectoryRow).where(
+            func.lower(TrajectoryRow.uid) == uid.lower()
+        )
         if uid_well:
-            stmt = stmt.where(TrajectoryRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(TrajectoryRow.uid_well) == uid_well.lower())
         if uid_wellbore:
-            stmt = stmt.where(TrajectoryRow.uid_wellbore == uid_wellbore)
+            stmt = stmt.where(
+                func.lower(TrajectoryRow.uid_wellbore) == uid_wellbore.lower()
+            )
         row = await self._session.scalar(stmt)
         return _to_trajectory(row) if row else None
 
@@ -527,11 +653,15 @@ class SqlAlchemyTrajectoryRepository:
     async def delete(
         self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
     ) -> None:
-        stmt = select(TrajectoryRow.id).where(TrajectoryRow.uid == uid)
+        stmt = select(TrajectoryRow.id).where(
+            func.lower(TrajectoryRow.uid) == uid.lower()
+        )
         if uid_well:
-            stmt = stmt.where(TrajectoryRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(TrajectoryRow.uid_well) == uid_well.lower())
         if uid_wellbore:
-            stmt = stmt.where(TrajectoryRow.uid_wellbore == uid_wellbore)
+            stmt = stmt.where(
+                func.lower(TrajectoryRow.uid_wellbore) == uid_wellbore.lower()
+            )
         trajectory_id = await self._session.scalar(stmt)
         if trajectory_id is None:
             return
@@ -552,7 +682,9 @@ class SqlAlchemyTrajectoryRepository:
         md_max: Decimal | None = None,
     ) -> list[TrajectoryStation]:
         trajectory_id = await self._session.scalar(
-            select(TrajectoryRow.id).where(TrajectoryRow.uid == trajectory_uid)
+            select(TrajectoryRow.id).where(
+                func.lower(TrajectoryRow.uid) == trajectory_uid.lower()
+            )
         )
         if trajectory_id is None:
             return []
@@ -581,7 +713,9 @@ class SqlAlchemyTrajectoryRepository:
         self, trajectory_uid: str, stations: list[TrajectoryStation]
     ) -> None:
         trajectory_id = await self._session.scalar(
-            select(TrajectoryRow.id).where(TrajectoryRow.uid == trajectory_uid)
+            select(TrajectoryRow.id).where(
+                func.lower(TrajectoryRow.uid) == trajectory_uid.lower()
+            )
         )
         if trajectory_id is None:
             return
@@ -621,6 +755,10 @@ class SqlAlchemyChangeLogRepository:
                 name_object=record.name_object,
                 name_well=record.name_well,
                 name_wellbore=record.name_wellbore,
+                change_info=record.change_info,
+                mnemonics=record.mnemonics,
+                start_index=record.start_index,
+                end_index=record.end_index,
             )
         )
         await self._session.flush()
@@ -642,11 +780,13 @@ class SqlAlchemyChangeLogRepository:
         if object_type:
             stmt = stmt.where(ChangeLogRow.object_type == object_type)
         if uid:
-            stmt = stmt.where(ChangeLogRow.uid == uid)
+            stmt = stmt.where(func.lower(ChangeLogRow.uid) == uid.lower())
         if uid_well:
-            stmt = stmt.where(ChangeLogRow.uid_well == uid_well)
+            stmt = stmt.where(func.lower(ChangeLogRow.uid_well) == uid_well.lower())
         if uid_wellbore:
-            stmt = stmt.where(ChangeLogRow.uid_wellbore == uid_wellbore)
+            stmt = stmt.where(
+                func.lower(ChangeLogRow.uid_wellbore) == uid_wellbore.lower()
+            )
         if change_type:
             stmt = stmt.where(ChangeLogRow.change_type == change_type)
         if start:
@@ -654,7 +794,11 @@ class SqlAlchemyChangeLogRepository:
         if end:
             stmt = stmt.where(ChangeLogRow.change_date <= end)
         if allowed_wells is not None:
-            stmt = stmt.where(ChangeLogRow.uid_well.in_(allowed_wells))
+            stmt = stmt.where(
+                func.lower(ChangeLogRow.uid_well).in_(
+                    {value.lower() for value in allowed_wells}
+                )
+            )
         stmt = stmt.order_by(ChangeLogRow.change_date, ChangeLogRow.id).limit(limit)
         rows = (await self._session.scalars(stmt)).all()
         return [
@@ -668,6 +812,10 @@ class SqlAlchemyChangeLogRepository:
                 name_object=row.name_object,
                 name_well=row.name_well,
                 name_wellbore=row.name_wellbore,
+                change_info=row.change_info,
+                mnemonics=row.mnemonics,
+                start_index=row.start_index,
+                end_index=row.end_index,
             )
             for row in rows
         ]

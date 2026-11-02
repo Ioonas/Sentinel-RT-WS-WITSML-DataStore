@@ -110,3 +110,8 @@ class ChangeLogRecord:
     name_object: str | None = None
     name_well: str | None = None
     name_wellbore: str | None = None
+    #: Contexto detallado del cambio (``cs_changeHistory``).
+    change_info: str | None = None
+    mnemonics: str | None = None
+    start_index: str | None = None
+    end_index: str | None = None

@@ -10,7 +10,13 @@ from httpx import AsyncClient
 from lxml import etree
 
 from sentinel.wmls_transport.wsdl import OFFICIAL_WSDL
-from sentinel.xml_schema.namespaces import ACTION_NS, MESSAGE_NS, SOAP_NS, WITSML_NS
+from sentinel.xml_schema.namespaces import (
+    ACTION_NS,
+    API_NS,
+    MESSAGE_NS,
+    SOAP_NS,
+    WITSML_NS,
+)
 from sentinel.xml_schema.xsd import LxmlXsdValidator
 
 pytestmark = pytest.mark.integration
@@ -77,7 +83,8 @@ async def create_writer(client: AsyncClient, csrf: str) -> str:
 
 WELL = (
     f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well uid="w-1">'
-    "<name>Well One</name></well></wells>"
+    "<name>Well One</name><numGovt>GOV-1</numGovt>"
+    "<timeZone>-06:00</timeZone><numAPI>API-1</numAPI></well></wells>"
 )
 WELLBORE = (
     f'<wellbores xmlns="{WITSML_NS}" version="1.4.1.1">'
@@ -112,6 +119,22 @@ TRAJECTORY = (
 )
 
 
+TIME_LOG = (
+    f'<logs xmlns="{WITSML_NS}" version="1.4.1.1">'
+    '<log uid="log-time" uidWell="w-2" uidWellbore="wb-2">'
+    "<nameWell>Well Two</nameWell><nameWellbore>WB Two</nameWellbore>"
+    "<name>Time Log</name><indexType>date time</indexType>"
+    "<direction>increasing</direction><indexCurve>TIME</indexCurve>"
+    '<logCurveInfo uid="TIME"><mnemonic>TIME</mnemonic><unit>unitless</unit>'
+    "<typeLogData>date time</typeLogData></logCurveInfo>"
+    '<logCurveInfo uid="C1"><mnemonic>C1</mnemonic><unit>m</unit>'
+    "<typeLogData>double</typeLogData></logCurveInfo>"
+    "<logData><mnemonicList>TIME,C1</mnemonicList><unitList>unitless,m</unitList>"
+    "<data>2026-10-30T00:00:00.000Z,1</data>"
+    "<data>2026-10-30T00:00:01.000Z,2</data></logData></log></logs>"
+)
+
+
 async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> None:
     secret = await create_writer(admin_client, csrf)
 
@@ -126,7 +149,49 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
         {"OptionsIn": "dataVersion=1.4.1.1&returnElements=all"},
     )
     assert result(capabilities) == 1
-    assert "well" in field(capabilities, "CapabilitiesOut")
+    capabilities_root = etree.fromstring(field(capabilities, "CapabilitiesOut").encode())
+    assert capabilities_root.tag == f"{{{API_NS}}}capServers"
+    assert capabilities_root.get("version") == "1.4.1"
+    cap_server = capabilities_root.find(f"{{{API_NS}}}capServer")
+    assert cap_server is not None
+    assert cap_server.get("apiVers") == "1.4.1"
+    assert cap_server.findtext(f"{{{API_NS}}}schemaVersion") == "1.4.1.1"
+    assert cap_server.findtext(f"{{{API_NS}}}cascadedDelete") == "false"
+    assert cap_server.findtext(f"{{{API_NS}}}supportUomConversion") == "false"
+    assert cap_server.findtext(f"{{{API_NS}}}compressionMethod") == "none"
+    growing = {
+        element.get("dataObject")
+        for element in cap_server.findall(f"{{{API_NS}}}growingTimeoutPeriod")
+    }
+    assert growing == {"log", "trajectory"}
+
+    functions = {
+        element.get("name"): element
+        for element in cap_server.findall(f"{{{API_NS}}}function")
+    }
+    assert set(functions) == {
+        "WMLS_GetCap",
+        "WMLS_GetFromStore",
+        "WMLS_AddToStore",
+        "WMLS_UpdateInStore",
+        "WMLS_DeleteFromStore",
+        "WMLS_GetVersion",
+        "WMLS_GetBaseMsg",
+    }
+    read_objects = {
+        element.text: element
+        for element in functions["WMLS_GetFromStore"].findall(f"{{{API_NS}}}dataObject")
+    }
+    assert set(read_objects) == {"changeLog", "log", "trajectory", "well", "wellbore"}
+    assert read_objects["log"].get("maxDataNodes")
+    assert read_objects["log"].get("maxDataPoints")
+    assert read_objects["trajectory"].get("maxDataNodes")
+    assert read_objects["trajectory"].get("maxDataPoints") is None
+    write_objects = {
+        element.text: element
+        for element in functions["WMLS_AddToStore"].findall(f"{{{API_NS}}}dataObject")
+    }
+    assert set(write_objects) == {"log", "trajectory", "well", "wellbore"}
 
     for object_type, xml in (
         ("well", WELL),
@@ -155,6 +220,54 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     assert result(read) == 1
     assert 'uid="w-1"' in field(read, "XMLout")
     assert 'version="1.4.1.1"' in field(read, "XMLout")
+
+    id_only = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-1"/></wells>',
+            "OptionsIn": "returnElements=id-only",
+        },
+    )
+    assert result(id_only) == 1
+    assert "<name>Well One</name>" in field(id_only, "XMLout")
+
+    for selection in ("<numGovt>GOV-1</numGovt>", "<numAPI>API-1</numAPI>"):
+        selected = await soap(
+            admin_client,
+            "WMLS_GetFromStore",
+            secret,
+            {
+                "WMLtypeIn": "well",
+                "QueryIn": f'<wells xmlns="{WITSML_NS}"><well>{selection}</well></wells>',
+                "OptionsIn": "returnElements=id-only",
+            },
+        )
+        assert result(selected) == 1, selection
+        selected_xml = field(selected, "XMLout")
+        assert 'uid="w-1"' in selected_xml
+        value = selection.split(">")[1].split("<")[0]
+        assert value in selected_xml
+
+    for options, code in (
+        ("returnElements=header-only", -425),
+        ("returnElements=data-only", -425),
+        ("returnElements=station-location-only", -425),
+        ("returnElements=latest-change-only", -476),
+    ):
+        rejected = await soap(
+            admin_client,
+            "WMLS_GetFromStore",
+            secret,
+            {
+                "WMLtypeIn": "well",
+                "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-1"/></wells>',
+                "OptionsIn": options,
+            },
+        )
+        assert result(rejected) == code, options
 
     log_read = await soap(
         admin_client,
@@ -228,6 +341,114 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     assert "<lastChangeType>delete</lastChangeType>" in xml_out
     assert "<nameObject>Well One</nameObject>" in xml_out
     assert 'uidObject="w-1"' in xml_out
+
+
+async def test_update_log_accepts_official_index_type_alias(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    secret = await create_writer(admin_client, csrf)
+    for object_type, xml in (
+        ("well", f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+         '<well uid="w-2"><name>Well Two</name></well></wells>'),
+        ("wellbore", f'<wellbores xmlns="{WITSML_NS}" version="1.4.1.1">'
+         '<wellbore uid="wb-2" uidWell="w-2"><nameWell>Well Two</nameWell>'
+         "<name>WB Two</name></wellbore></wellbores>"),
+        ("log", TIME_LOG),
+    ):
+        added = await soap(
+            admin_client,
+            "WMLS_AddToStore",
+            secret,
+            {"WMLtypeIn": object_type, "XMLin": xml, "OptionsIn": ""},
+        )
+        assert result(added) == 1, (object_type, field(added, "SuppMsgOut"))
+
+    update = (
+        f'<logs xmlns="{WITSML_NS}" version="1.4.1.1">'
+        '<log uid="log-time" uidWell="w-2" uidWellbore="wb-2">'
+        "<indexType>date time</indexType><direction>increasing</direction>"
+        "<indexCurve>TIME</indexCurve>"
+        "<logData><mnemonicList>TIME,C1</mnemonicList><unitList>unitless,m</unitList>"
+        "<data>2026-10-30T00:00:02.000Z,3</data></logData></log></logs>"
+    )
+    updated = await soap(
+        admin_client,
+        "WMLS_UpdateInStore",
+        secret,
+        {"WMLtypeIn": "log", "XMLin": update, "OptionsIn": ""},
+    )
+    assert result(updated) == 1, field(updated, "SuppMsgOut")
+
+    mismatch = update.replace("date time", "measured depth")
+    rejected = await soap(
+        admin_client,
+        "WMLS_UpdateInStore",
+        secret,
+        {"WMLtypeIn": "log", "XMLin": mismatch, "OptionsIn": ""},
+    )
+    assert result(rejected) == -412
+    assert field(rejected, "SuppMsgOut").isascii()
+
+    added = await soap(
+        admin_client,
+        "WMLS_AddToStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "XMLin": f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+            '<well uid="w-3"><name>Well Three</name></well></wells>',
+            "OptionsIn": "",
+        },
+    )
+    assert result(added) == 1
+
+    stored = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-3"/></wells>',
+            "OptionsIn": "",
+        },
+    )
+    assert result(stored) == 1
+    changed_at = field(stored, "XMLout").split("<dTimLastChange>")[1].split("<")[0]
+
+    def changed_query(value: str) -> str:
+        return (
+            f'<wells xmlns="{WITSML_NS}"><well><commonData>'
+            f"<dTimLastChange>{value}</dTimLastChange>"
+            "</commonData></well></wells>"
+        )
+
+    filtered = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": changed_query(changed_at),
+            "OptionsIn": "returnElements=id-only",
+        },
+    )
+    assert result(filtered) == 1
+    assert 'uid="w-3"' not in field(filtered, "XMLout")
+
+    older = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": changed_query("1900-01-01T00:00:00.000Z"),
+            "OptionsIn": "returnElements=id-only",
+        },
+    )
+    assert result(older) == 1
+    older_xml = field(older, "XMLout")
+    assert 'uid="w-2"' in older_xml
+    assert 'uid="w-3"' in older_xml
 
 
 async def test_wmls_requires_authentication(admin_client: AsyncClient) -> None:

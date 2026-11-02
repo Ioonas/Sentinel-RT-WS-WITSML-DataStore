@@ -15,6 +15,8 @@ from __future__ import annotations
 
 WITSML_NS = "http://www.witsml.org/schemas/1series"
 WITSML = f"{{{WITSML_NS}}}"
+API_NS = "http://www.witsml.org/api/141"
+API = f"{{{API_NS}}}"
 SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 SOAP = f"{{{SOAP_NS}}}"
 WSDL_NS = "http://www.witsml.org/wsdl/120"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 from sentinel import SCHEMA_VERSION
 from sentinel.identity_access.domain import Principal
 from sentinel.shared.errors import ValidationError
@@ -31,16 +33,31 @@ async def execute(
     correlation_id: str,
 ) -> dict[str, str | int]:
     try:
-        return await _execute(service, principal, operation, parameters, correlation_id)
+        fields = await _execute(service, principal, operation, parameters, correlation_id)
     except WitsmlError as exc:
-        return _error_fields(operation, exc.wmls_code, exc.message)
+        fields = _error_fields(operation, exc.wmls_code, exc.message)
     except ValidationError as exc:
         code = (
             WmlsCode.QUERY_TEMPLATE_NONCONFORMING
             if operation == "WMLS_GetFromStore"
             else WmlsCode.INPUT_TEMPLATE_NONCONFORMING
         )
-        return _error_fields(operation, int(code), exc.message)
+        fields = _error_fields(operation, int(code), exc.message)
+    return _ascii_fields(fields)
+
+
+def _ascii_fields(fields: dict[str, str | int]) -> dict[str, str | int]:
+    """Garantiza ``SuppMsgOut`` en ASCII.
+
+    Los clientes WITSML heredados (Python 2) imprimen ``SuppMsgOut`` en la
+    consola y fallan con ``UnicodeEncodeError`` ante cualquier carácter no
+    ASCII. El resto de los campos (``XMLout``) conserva el texto original.
+    """
+    message = fields.get("SuppMsgOut")
+    if isinstance(message, str) and not message.isascii():
+        decomposed = unicodedata.normalize("NFKD", message)
+        fields["SuppMsgOut"] = decomposed.encode("ascii", "replace").decode("ascii")
+    return fields
 
 
 async def _execute(
@@ -140,7 +157,9 @@ async def _execute(
         )
         return {"SuppMsgOut": result.supp_msg or "", "Result": result.code}
 
-    raise WitsmlError(WmlsCode.QUERY_NOT_SUPPORTED, f"Operación no soportada: {operation}")
+    raise WitsmlError(
+        WmlsCode.QUERY_NOT_SUPPORTED, f"Unsupported operation: {operation}"
+    )
 
 
 def _validate_data_version(options: str) -> None:
@@ -150,7 +169,7 @@ def _validate_data_version(options: str) -> None:
     if normalized != SCHEMA_VERSION:
         raise WitsmlError(
             WmlsCode.DATA_VERSION_NOT_SUPPORTED,
-            f"dataVersion no soportado: {normalized}.",
+            f"Unsupported dataVersion: {normalized}.",
         )
 
 

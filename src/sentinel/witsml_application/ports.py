@@ -40,6 +40,8 @@ class ListFilter:
     text_filters: dict[str, str] = field(default_factory=dict)
     allowed_wells: frozenset[str] | None = None
     limit: int | None = None
+    created_after: datetime | None = None
+    changed_after: datetime | None = None
 
 
 class WellRepositoryPort(Protocol):
@@ -94,7 +96,37 @@ class LogRepositoryPort(Protocol):
         start: datetime | Decimal | None = None,
         end: datetime | Decimal | None = None,
         latest: int | None = None,
+        limit: int | None = None,
     ) -> list[LogSample]: ...
+
+    async def count_samples(
+        self,
+        log_uid: str,
+        *,
+        start: datetime | Decimal | None = None,
+        end: datetime | Decimal | None = None,
+    ) -> int: ...
+
+    async def sample_range(
+        self, log_uid: str
+    ) -> tuple[datetime | Decimal | None, datetime | Decimal | None]: ...
+
+    async def delete_samples(
+        self,
+        log_uid: str,
+        *,
+        start: datetime | Decimal | None = None,
+        end: datetime | Decimal | None = None,
+    ) -> int: ...
+
+    async def remove_curve_values(
+        self,
+        log_uid: str,
+        mnemonic: str,
+        *,
+        start: datetime | Decimal | None = None,
+        end: datetime | Decimal | None = None,
+    ) -> int: ...
 
     async def upsert_samples(
         self, log_uid: str, samples: list[LogSample], index_type: str

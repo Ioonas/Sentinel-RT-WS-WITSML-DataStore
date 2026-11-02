@@ -17,7 +17,7 @@ class WitsmlError(AppError):
 
 def not_supported(object_type: str) -> WitsmlError:
     return WitsmlError(
-        WmlsCode.OBJECT_NOT_SUPPORTED, f"El objeto '{object_type}' no está soportado."
+        WmlsCode.OBJECT_NOT_SUPPORTED, f"Object '{object_type}' is not supported."
     )
 
 

@@ -26,7 +26,16 @@ DATA_CHILDREN = frozenset({"logData", "logCurveInfo", "trajectoryStation"})
 SERVER_MANAGED_ALL = SERVER_MANAGED_ATTRIBUTES | SERVER_MANAGED_CHILDREN
 
 TEXT_FILTERS: dict[str, tuple[str, ...]] = {
-    "well": ("name", "field", "country", "operator", "statusWell", "purposeWell"),
+    "well": (
+        "name",
+        "field",
+        "country",
+        "operator",
+        "statusWell",
+        "purposeWell",
+        "numGovt",
+        "numAPI",
+    ),
     "wellbore": (
         "name",
         "purposeWellbore",
@@ -152,7 +161,13 @@ def parse_iso_datetime(raw: str) -> datetime:
 
 def format_datetime(value: datetime) -> str:
     value = value.astimezone(UTC)
-    return value.strftime("%Y-%m-%dT%H:%M:%S.") + f"{value.microsecond // 1000:03d}Z"
+    # El API compara ``dTimLastChange``/``dTimCreation`` por "mayor que". Si se
+    # truncan los microsegundos, el valor leído por el cliente queda por debajo
+    # del almacenado y una consulta con ese mismo instante vuelve a incluir el
+    # objeto. Se conserva la precisión completa cuando existe.
+    if value.microsecond:
+        return value.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    return value.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def format_index_value(value: datetime | Decimal | None) -> str:
@@ -160,7 +175,10 @@ def format_index_value(value: datetime | Decimal | None) -> str:
         return ""
     if isinstance(value, datetime):
         return format_datetime(value)
-    return format(value, "f")
+    # ``wcmp`` compara dobles con tolerancia, pero ``log_verify`` compara los
+    # valores de índice como cadenas exactas. Se eliminan ceros/notación
+    # científica conservando la representación decimal canónica.
+    return format(value.normalize(), "f")
 
 
 def normalize_uid(value: str | None) -> str | None:
@@ -312,9 +330,12 @@ def parse_log_data(element: etree._Element) -> LogDataBlock:
     mnemonics = [part.strip() for part in mnemonic_list.split(",")]
     unit_list = text_of(log_data, "unitList") or ""
     units = [part.strip() for part in unit_list.split(",")] if unit_list else []
-    data_el = child(log_data, "data")
     rows: list[dict[str, str | None]] = []
-    if data_el is not None and data_el.text:
+    # ``data`` es repetible en el esquema oficial (maxOccurs="unbounded"): cada
+    # elemento puede contener una fila o varias separadas por saltos de línea.
+    for data_el in children(log_data, "data"):
+        if not data_el.text:
+            continue
         for line in data_el.text.strip().splitlines():
             line = line.strip()
             if not line:
@@ -396,6 +417,10 @@ class ObjectQuery:
     change_type: str | None = None
     object_type: str | None = None
     latest_values: int | None = None
+    created_after: datetime | None = None
+    changed_after: datetime | None = None
+    object_growing: bool | None = None
+    selection_items: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -403,6 +428,7 @@ class QueryOptions:
     return_elements: str = "all"
     request_latest_values: int | None = None
     max_return_nodes: int | None = None
+    request_object_selection: bool = False
 
 
 def option_value(options: str | None, name: str) -> str | None:
@@ -424,7 +450,7 @@ def option_value(options: str | None, name: str) -> str | None:
         except ValidationError:
             return None
         return text_of(root, name)
-    values = parse_qs(text, keep_blank_values=True)
+    values = parse_qs(text.replace(";", "&"), keep_blank_values=True)
     raw = values.get(name)
     if not raw:
         return None
@@ -436,10 +462,14 @@ def parse_options(options_xml: str | None) -> QueryOptions:
     return_elements = (option_value(options_xml, "returnElements") or "all").lower()
     latest = option_value(options_xml, "requestLatestValues")
     max_nodes = option_value(options_xml, "maxReturnNodes")
+    selection = option_value(options_xml, "requestObjectSelectionCapability")
     return QueryOptions(
         return_elements=return_elements,
         request_latest_values=int(latest) if latest and latest.isdigit() else None,
         max_return_nodes=int(max_nodes) if max_nodes and max_nodes.isdigit() else None,
+        request_object_selection=str(selection).strip().lower() == "true"
+        if selection is not None
+        else False,
     )
 
 
@@ -506,9 +536,36 @@ def _parse_query_element(
         for name in TEXT_FILTERS.get(object_type, ())
         if (value := text_of(element, name)) is not None
     }
+    common = child(element, "commonData")
+    created_after = _common_datetime(common, "dTimCreation")
+    changed_after = _common_datetime(common, "dTimLastChange")
+    latest = attr(element, "requestLatestValues")
+    selection_items = _selection_items(element)
+    object_growing = _boolean_text(text_of(element, "objectGrowing"))
+
+    if object_type == "changeLog":
+        history = child(element, "changeHistory")
+        change_type = None
+        start_index: datetime | Decimal | None = None
+        if history is not None:
+            change_type = text_of(history, "changeType")
+            start_index = _common_datetime(history, "dTimChange")
+        if change_type is None:
+            change_type = text_of(element, "changeType")
+        return ObjectQuery(
+            uid=attr(element, "uidObject") or attr(element, "uid"),
+            uid_well=uid_well,
+            uid_wellbore=uid_wellbore,
+            change_type=change_type,
+            object_type=text_of(element, "objectType"),
+            start_index=start_index,
+            created_after=created_after,
+            changed_after=changed_after,
+            selection_items=selection_items,
+        )
+
     start_index = _index_filter(element, ("startIndex", "startDateTimeIndex"), index_type)
     end_index = _index_filter(element, ("endIndex", "endDateTimeIndex"), index_type)
-    latest = attr(element, "requestLatestValues")
     return ObjectQuery(
         uid=attr(element, "uid"),
         uid_well=uid_well,
@@ -521,7 +578,48 @@ def _parse_query_element(
         change_type=text_of(element, "changeType"),
         object_type=text_of(element, "objectType"),
         latest_values=int(latest) if latest and latest.isdigit() else None,
+        created_after=created_after,
+        changed_after=changed_after,
+        object_growing=object_growing,
+        selection_items=selection_items,
     )
+
+
+def _boolean_text(raw: str | None) -> bool | None:
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if value in ("true", "1"):
+        return True
+    if value in ("false", "0"):
+        return False
+    return None
+
+
+def _selection_items(element: etree._Element) -> frozenset[str]:
+    """Elementos de selección usados en la plantilla de consulta.
+
+    ``returnElements`` solicita elementos "adicionales" a los de selección, por
+    lo que éstos deben seguir presentes en la respuesta aunque el modo sea
+    ``id-only`` o ``data-only`` (WITSML STORE API §6.6.2.1).
+    """
+    items = {
+        localname(item) for item in element if localname(item) in _SELECTION_ITEMS
+    }
+    common = child(element, "commonData")
+    if common is not None and child(common, "dTimLastChange") is not None:
+        items.add("dTimLastChange")
+    return frozenset(items)
+
+
+def _common_datetime(common: etree._Element | None, name: str) -> datetime | None:
+    """``dTimCreation``/``dTimLastChange`` filtran por comparación "mayor que"."""
+    if common is None:
+        return None
+    value = text_of(common, name)
+    if value is None:
+        return None
+    return parse_iso_datetime(value)
 
 
 def _index_filter(
@@ -530,9 +628,33 @@ def _index_filter(
     for name in names:
         item = child(element, name)
         if item is not None and item.text and item.text.strip():
-            effective = "time" if name.endswith("DateTimeIndex") else index_type
+            # ``startIndex``/``endIndex`` son numéricos por definición; sólo
+            # ``startDateTimeIndex``/``endDateTimeIndex`` son marcas de tiempo.
+            effective = "time" if name.endswith("DateTimeIndex") else "numeric"
             return parse_index_value(item.text, effective)
     return None
+
+
+def index_bounds(
+    element: etree._Element,
+) -> tuple[datetime | Decimal | None, datetime | Decimal | None]:
+    """Rango de índices de una plantilla de borrado/consulta."""
+    return (
+        _index_filter(element, ("startIndex", "startDateTimeIndex"), "time"),
+        _index_filter(element, ("endIndex", "endDateTimeIndex"), "time"),
+    )
+
+
+def has_index_bounds(element: etree._Element) -> bool:
+    return any(
+        child(element, name) is not None
+        for name in (
+            "startIndex",
+            "endIndex",
+            "startDateTimeIndex",
+            "endDateTimeIndex",
+        )
+    )
 
 
 def merge_header(stored: etree._Element, incoming: etree._Element) -> etree._Element:
@@ -546,6 +668,7 @@ def merge_header(stored: etree._Element, incoming: etree._Element) -> etree._Ele
         if name in SERVER_MANAGED_ATTRIBUTES or name in ("uid", "uidWell", "uidWellbore"):
             continue
         merged.set(name, value)
+    order = _order_for(merged)
     for item in incoming:
         name = localname(item)
         if name in DATA_CHILDREN or name in SERVER_MANAGED_CHILDREN:
@@ -555,8 +678,33 @@ def merge_header(stored: etree._Element, incoming: etree._Element) -> etree._Ele
             for old in existing:
                 merged.replace(old, copy.deepcopy(item))
         else:
-            merged.append(copy.deepcopy(item))
+            new_item = copy.deepcopy(item)
+            if order is not None:
+                _insert_ordered(merged, new_item, order)
+            else:
+                position = len(merged)
+                for index, candidate in enumerate(merged):
+                    if localname(candidate) in _TRAILING_OBJECT_CHILDREN:
+                        position = index
+                        break
+                merged.insert(position, new_item)
     return merged
+
+
+def _order_for(element: etree._Element) -> tuple[str, ...] | None:
+    name = localname(element)
+    if name == "log":
+        return _LOG_CHILD_ORDER
+    if name in ("trajectory", "trajectorys"):
+        return _TRAJECTORY_CHILD_ORDER
+    return None
+
+
+def _trailing_position(element: etree._Element) -> int:
+    for index, candidate in enumerate(element):
+        if localname(candidate) in _TRAILING_OBJECT_CHILDREN:
+            return index
+    return len(element)
 
 
 def apply_server_fields(
@@ -634,6 +782,121 @@ def _set_common_data_text(
     common.insert(position, item)
 
 
+_LOG_CHILD_ORDER: tuple[str, ...] = (
+    "nameWell",
+    "nameWellbore",
+    "name",
+    "objectGrowing",
+    "dataUpateRate",
+    "curveSensorsAligned",
+    "dataGroup",
+    "serviceCompany",
+    "runNumber",
+    "bhaRunNumber",
+    "pass",
+    "creationDate",
+    "description",
+    "dataDelimiter",
+    "indexType",
+    "startIndex",
+    "endIndex",
+    "stepIncrement",
+    "startDateTimeIndex",
+    "endDateTimeIndex",
+    "direction",
+    "indexCurve",
+    "nullValue",
+    "logParam",
+    "logCurveInfo",
+    "logData",
+    "commonData",
+    "customData",
+)
+
+_LOG_CURVE_CHILD_ORDER: tuple[str, ...] = (
+    "mnemonic",
+    "classWitsml",
+    "classIndex",
+    "unit",
+    "mnemAlias",
+    "nullValue",
+    "alternateIndex",
+    "wellDatum",
+    "minIndex",
+    "maxIndex",
+    "minDateTimeIndex",
+    "maxDateTimeIndex",
+    "curveDescription",
+    "sensorOffset",
+    "dataSource",
+    "densData",
+    "traceState",
+    "traceOrigin",
+    "typeLogData",
+    "axisDefinition",
+    "extensionNameValue",
+)
+
+_TRAJECTORY_CHILD_ORDER: tuple[str, ...] = (
+    "nameWell",
+    "nameWellbore",
+    "name",
+    "objectGrowing",
+    "parentTrajectory",
+    "dTimTrajStart",
+    "dTimTrajEnd",
+    "mdMn",
+    "mdMx",
+    "serviceCompany",
+    "magDeclUsed",
+    "gridCorUsed",
+    "gridConUsed",
+    "aziVertSect",
+    "dispNsVertSectOrig",
+    "dispEwVertSectOrig",
+    "definitive",
+    "memory",
+    "finalTraj",
+    "aziRef",
+    "trajectoryStation",
+    "commonData",
+    "customData",
+)
+
+
+def _insert_ordered(
+    parent: etree._Element, item: etree._Element, order: tuple[str, ...]
+) -> None:
+    wanted = order.index(localname(item)) if localname(item) in order else len(order)
+    position = len(parent)
+    for index, candidate in enumerate(parent):
+        name = localname(candidate)
+        rank = order.index(name) if name in order else len(order)
+        if rank > wanted:
+            position = index
+            break
+    parent.insert(position, item)
+
+
+def set_ordered_child_text(
+    parent: etree._Element,
+    name: str,
+    value: str,
+    *,
+    uom: str | None = None,
+    order: tuple[str, ...] = _LOG_CHILD_ORDER,
+) -> etree._Element:
+    """Crea/actualiza un hijo respetando el orden del XSD oficial."""
+    existing = child(parent, name)
+    if existing is None:
+        existing = etree.Element(f"{WITSML}{name}")
+        _insert_ordered(parent, existing, order)
+    existing.text = value
+    if uom is not None:
+        existing.set("uom", uom)
+    return existing
+
+
 def contextual_names(
     element: etree._Element,
 ) -> tuple[str | None, str | None, str | None]:
@@ -671,14 +934,16 @@ def strip_payload(element: etree._Element) -> None:
             element.remove(item)
 
 
-def validate_object_element(object_type: str, element: etree._Element) -> None:
+def validate_object_element(
+    object_type: str, element: etree._Element, *, require_uid: bool = True
+) -> None:
     spec: ObjectSpec = spec_for(object_type)
     if localname(element) != spec.name:
         raise ValidationError(
             f"Se esperaba <{spec.name}> y se recibió <{localname(element)}>."
         )
     uid = normalize_uid(attr(element, "uid"))
-    if object_type != "well" and not uid:
+    if require_uid and object_type != "well" and not uid:
         raise ValidationError(f"{object_type} requiere uid.")
     if object_type in ("wellbore", "log", "trajectory") and not attr(element, "uidWell"):
         raise ValidationError(f"{object_type} requiere uidWell.")
@@ -711,28 +976,93 @@ def build_log_data(
     mnemonic_list.text = ",".join(mnemonics)
     unit_list = etree.SubElement(log_data, f"{WITSML}unitList")
     unit_list.text = ",".join(units)
-    data = etree.SubElement(log_data, f"{WITSML}data")
-    data.text = "\n" + "\n".join(",".join(row) for row in rows) + "\n"
+    # El cliente de certificación de Energistics recorre los hijos de
+    # ``logData/data`` como filas, por lo que se emite un ``data`` por fila
+    # (el XSD oficial declara ``maxOccurs="unbounded"``).
+    for row in rows:
+        data = etree.SubElement(log_data, f"{WITSML}data")
+        data.text = ",".join(row)
     return log_data
 
 
-def apply_return_elements(element: etree._Element, mode: str) -> etree._Element:
+def apply_return_elements(
+    element: etree._Element,
+    mode: str,
+    selection_items: frozenset[str] = frozenset(),
+) -> etree._Element:
     result = copy.deepcopy(element)
     if mode == "id-only":
+        allowed = _ID_ONLY_CHILDREN | selection_items
         for item in list(result):
-            result.remove(item)
+            if localname(item) not in allowed:
+                result.remove(item)
+        if "dTimLastChange" in selection_items:
+            common = child(result, "commonData")
+            if common is not None:
+                for item in list(common):
+                    if localname(item) != "dTimLastChange":
+                        common.remove(item)
     elif mode == "header-only":
         strip_payload(result)
     elif mode == "data-only":
+        allowed = {"logData", "trajectoryStation"} | selection_items
         for item in list(result):
-            if localname(item) != "logData":
+            if localname(item) not in allowed:
                 result.remove(item)
     elif mode == "station-location-only":
+        allowed = {"trajectoryStation"} | selection_items
+        for item in list(result):
+            if localname(item) not in allowed:
+                result.remove(item)
         for station in children(result, "trajectoryStation"):
             for item in list(station):
-                if localname(item) not in ("md", "incl", "azi", "tvd"):
+                if localname(item) not in _STATION_LOCATION_CHILDREN:
                     station.remove(item)
     return result
+
+
+def apply_selection_capability(element: etree._Element) -> etree._Element:
+    """Respuesta mínima de ``requestObjectSelectionCapability`` (SQ-002)."""
+    result = copy.deepcopy(element)
+    allowed = {"name", "numGovt", "numAPI", "commonData"}
+    for item in list(result):
+        if localname(item) not in allowed:
+            result.remove(item)
+    common = child(result, "commonData")
+    if common is not None:
+        for item in list(common):
+            if localname(item) != "dTimLastChange":
+                common.remove(item)
+    return result
+
+
+def apply_attribute_deletions(
+    stored: etree._Element, query: etree._Element
+) -> bool:
+    """Elimina atributos indicados con valor vacío en un borrado selectivo.
+
+    Devuelve ``True`` si se eliminó al menos un atributo. El emparejamiento es
+    por nombre de elemento y, cuando existe, por atributo ``uid``.
+    """
+    changed = False
+    for query_child in query:
+        name = localname(query_child)
+        candidates = [item for item in stored if localname(item) == name]
+        query_uid = attr(query_child, "uid")
+        if query_uid:
+            candidates = [
+                item for item in candidates if attr(item, "uid") == query_uid
+            ]
+        for candidate in candidates:
+            for attribute, value in query_child.attrib.items():
+                if attribute in ("uid", "uidWell", "uidWellbore", "uidRef"):
+                    continue
+                if value == "" and attribute in candidate.attrib:
+                    del candidate.attrib[attribute]
+                    changed = True
+            if apply_attribute_deletions(candidate, query_child):
+                changed = True
+    return changed
 
 
 def new_container(object_type: str) -> etree._Element:
@@ -745,6 +1075,48 @@ def new_container(object_type: str) -> etree._Element:
 
 
 _TRAILING_OBJECT_CHILDREN = frozenset({"commonData", "customData"})
+
+#: ``returnElements=id-only``: uid + nombre del objeto y de sus padres.
+_ID_ONLY_CHILDREN = frozenset({"name", "nameWell", "nameWellbore"})
+
+#: ``returnElements=data-only``: datos crecientes y contexto mínimo.
+_DATA_ONLY_CHILDREN = frozenset(
+    {
+        "indexCurve",
+        "logCurveInfo",
+        "logData",
+        "mdMn",
+        "mdMx",
+        "trajectoryStation",
+    }
+)
+
+#: ``returnElements=station-location-only`` (WITSML STORE API §6.6.5).
+_STATION_LOCATION_CHILDREN = frozenset(
+    {"dTimStn", "typeTrajStation", "md", "tvd", "incl", "azi", "location"}
+)
+
+#: Elementos de selección de datos (WITSML STORE API §7) que deben devolverse
+#: siempre junto con ``returnElements``, aunque el modo los excluya.
+_SELECTION_ITEMS = frozenset(
+    {
+        "name",
+        "nameWell",
+        "nameWellbore",
+        "numGovt",
+        "numAPI",
+        "indexType",
+        "startIndex",
+        "endIndex",
+        "startDateTimeIndex",
+        "endDateTimeIndex",
+        "objectGrowing",
+        "mdMn",
+        "mdMx",
+        "logCurveInfo",
+        "logData",
+    }
+)
 
 
 def append_group_child(
@@ -764,11 +1136,10 @@ def append_group_child(
 
 
 def make_supp_msg(uids: list[str], messages: list[str] | None = None) -> str:
-    root = etree.Element("suppMsgOut")
-    for uid in uids:
-        item = etree.SubElement(root, "uid")
-        item.text = uid
-    for message in messages or ():
-        item = etree.SubElement(root, "message")
-        item.text = message
-    return etree.tostring(root, encoding="unicode")
+    """Construye ``SuppMsgOut`` en texto plano.
+
+    El cliente de certificación consume este campo como una cadena (toma el
+    primer UID generado y lo usa tal cual). El formato XML de versiones
+    anteriores hacía que ese UID incluyera las etiquetas y fallara la lectura.
+    """
+    return " ".join([*uids, *(messages or ())])

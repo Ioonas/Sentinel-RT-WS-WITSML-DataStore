@@ -151,6 +151,10 @@ class ChangeLogRow(Base):
     name_object: Mapped[str | None] = mapped_column(String(255))
     name_well: Mapped[str | None] = mapped_column(String(255))
     name_wellbore: Mapped[str | None] = mapped_column(String(255))
+    change_info: Mapped[str | None] = mapped_column(Text)
+    mnemonics: Mapped[str | None] = mapped_column(Text)
+    start_index: Mapped[str | None] = mapped_column(String(64))
+    end_index: Mapped[str | None] = mapped_column(String(64))
     correlation_id: Mapped[str | None] = mapped_column(String(64))
     __table_args__ = (
         Index("ix_change_log_object", "object_type", "uid"),
