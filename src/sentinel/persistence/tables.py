@@ -1,7 +1,9 @@
 """Tablas PostgreSQL del producto.
 
 La integridad referencial entre objetos WITSML se valida en los casos de uso y
-en la misma transacción; no se habilita borrado en cascada (§6, §7).
+en la misma transacción; no se habilita borrado en cascada a nivel de base de
+datos. La cascada WITSML (`cascadedDelete=true`) se resuelve en la capa de
+aplicación para comprobar permisos y registrar `changeLog` (§6, §7).
 """
 
 from __future__ import annotations

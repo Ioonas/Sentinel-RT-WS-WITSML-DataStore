@@ -542,6 +542,7 @@ class QueryOptions:
     request_latest_values: int | None = None
     max_return_nodes: int | None = None
     request_object_selection: bool = False
+    cascaded_delete: bool = False
 
 
 def option_value(options: str | None, name: str) -> str | None:
@@ -578,12 +579,16 @@ def parse_options(options_xml: str | None) -> QueryOptions:
     latest = option_value(options_xml, "requestLatestValues")
     max_nodes = option_value(options_xml, "maxReturnNodes")
     selection = option_value(options_xml, "requestObjectSelectionCapability")
+    cascaded = option_value(options_xml, "cascadedDelete")
     return QueryOptions(
         return_elements=return_elements,
         request_latest_values=int(latest) if latest and latest.isdigit() else None,
         max_return_nodes=int(max_nodes) if max_nodes and max_nodes.isdigit() else None,
         request_object_selection=str(selection).strip().lower() == "true"
         if selection is not None
+        else False,
+        cascaded_delete=str(cascaded).strip().lower() == "true"
+        if cascaded is not None
         else False,
     )
 

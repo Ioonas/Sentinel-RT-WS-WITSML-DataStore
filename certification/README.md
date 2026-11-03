@@ -173,26 +173,39 @@ script, WSDL ni XSD oficial.
 
 | Ejecución | Suite | Duración | Scripts | Fallos | Resultado |
 | --- | --- | --- | --- | --- | --- |
-| `log_20261103134009`<br>(2026-11-03 13:40, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 82 min 35 s | 74 pass, 1 skipped | 0 | `!*** SUCCESS` |
+| `log_20261103153118`<br>(2026-11-03 15:31, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 82 min 10 s | 75 pass, 0 skipped | 0 | `!*** SUCCESS` |
+| `log_20261103134009`<br>(2026-11-03 13:40, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 82 min 35 s | 74 pass, 1 skipped | 0 | `!*** SUCCESS` (histórica) |
 | `log_20261101203643`<br>(2026-11-01 20:36, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 79 min 42 s | 70 pass, 6 skipped | 0 | `!*** SUCCESS` (histórica) |
 
-La ejecución del **2026-11-03** es la que certifica la configuración publicada:
-`maxDataPoints` 3 000 000, `growingTimeoutPeriod` 3 600 s,
-`changeDetectionPeriod` 60 s (D-17) y respuestas gzip según `Accept-Encoding`,
-sin `compressionMethod` en `GetCap` (D-01). Además incorpora `mudLog` como
-objeto de primera clase, por lo que la suite ejecuta y aprueba `test34`,
-`test61`, `test63`, `test92b` y `test94e`. Se ejecutó con el dataset estándar
-recién cargado y con `data_grower_script` publicando en
+La ejecución del **2026-11-03 15:31** es la que certifica la configuración
+publicada: `maxDataPoints` 3 000 000, `growingTimeoutPeriod` 3 600 s,
+`changeDetectionPeriod` 60 s (D-17), respuestas gzip según `Accept-Encoding`
+sin `compressionMethod` en `GetCap` (D-01), `cascadedDelete=true` publicado y
+soportado, y `mudLog` como objeto de primera clase. La suite ejecuta y aprueba
+`test22`, `test34`, `test61`, `test63`, `test92b` y `test94e`. Se ejecutó con el
+dataset estándar recién cargado y con `data_grower_script` publicando en
 `Energistics-w1-wb1-log-0001` y `Energistics-w1-wb1-trajectory-0001` durante
 toda la suite.
 
-El único script omitido es `test22`, que exige `cascadedDelete=true`; el Store
-declara `false` (decisión vigente) y el borrado no en cascada se cubre con la
-prueba propia del código `-432` (D-15). La ejecución del 2026-11-01 se conserva
-como evidencia histórica previa a `mudLog`; en ella los 6 scripts omitidos
-correspondían a objetos fuera del alcance 1.0.3.
+No quedan scripts omitidos. La ejecución del 2026-11-03 13:40 se conserva como
+evidencia histórica previa a `cascadedDelete` (omitía `test22`), y la del
+2026-11-01 como evidencia previa a `mudLog`; en esta última los 6 scripts
+omitidos correspondían a objetos fuera del alcance 1.0.3.
 
 Artefactos de la ejecución vigente y manifiestos locales (ignorados por Git):
+
+- `certification/results/log_20261103153118.txt`
+  — `37be5151d06b1eebde6cd5ff78de4878793253853ac3cc49d32e0bbc6163e2c6`
+- `certification/results/log_20261103153118_soap.txt`
+  — `0e943e49d794df19326fb8f9bc5b7675948b5619defa7dfc96d3badf5de2026a`
+- `certification/results/wpctt_witsml_result_20261103153118.txt`
+  — `6d7ece3d866c61785bf99a8684040ed7631a2330cb674c515136f57957349399`
+- `certification/manifests/wpctt_20261103153118.sha256`
+- `certification/manifests/suite_20261103153118.sha256`
+  (4 179 archivos, `# aggregate-sha256:
+  25a88acc328a35d355a1fd76e361a8276d1168535339623d61a7762f2bc09f0d`)
+
+Evidencia histórica del 2026-11-03 13:40:
 
 - `certification/results/log_20261103134009.txt`
   — `e656281a9193a09b61ade13919466e9318133bd224182b392f406b937579adc5`
@@ -202,8 +215,6 @@ Artefactos de la ejecución vigente y manifiestos locales (ignorados por Git):
   — `674455f910ac34c00a67e925258221f04b411428246b18407ef34f4d438e2698`
 - `certification/manifests/wpctt_20261103.sha256`
 - `certification/manifests/suite_20261103.sha256`
-  (4 179 archivos, `# aggregate-sha256:
-  25a88acc328a35d355a1fd76e361a8276d1168535339623d61a7762f2bc09f0d`)
 
 Evidencia histórica del 2026-11-01:
 
@@ -248,7 +259,8 @@ MUST que la herramienta no ejecuta. La trazabilidad completa está en
 | 83 y criterio 19 | `test_wmls_gzip_responses` | Gzip de respuesta, `Vary` y rechazo de identidad. |
 | 84 | `test_d15_84_client_compression_is_not_advertised` | Sin `compressionMethod` en `GetCap`; solicitud comprimida con fault 400. |
 | 6, 7 y 19 | Pruebas existentes de `GetCap` e `id-only` | Capacidades publicadas y consultas de identificación. |
-| `-432` | Pruebas existentes de borrado con hijos | `cascadedDelete=false` sin borrado en cascada. |
+| 22 | Prueba oficial `test22` + `test_wmls_cascaded_delete_removes_descendants` | `cascadedDelete=true` elimina `well -> wellbore -> log/trajectory/mudLog` y registra un `delete` por objeto. |
+| `-432` | `test_wmls_discovery_and_crud` + `test_wmls_cascaded_delete_removes_descendants` | Sin `cascadedDelete=true`, el padre con hijos se rechaza con `-432`. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y duplicados rechazados con `-463`. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4) | Lectura por REST de un alta SOAP y borrado REST visible por SOAP. |
 

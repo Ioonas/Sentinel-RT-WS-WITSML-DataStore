@@ -1417,8 +1417,14 @@ class WitsmlStoreService:
         correlation_id: str,
     ) -> StoreResult:
         started = time.perf_counter()
+        options = xd.parse_options(options_xml)
         try:
-            result = await self._delete(principal, object_type=object_type, query_xml=query_xml)
+            result = await self._delete(
+                principal,
+                object_type=object_type,
+                query_xml=query_xml,
+                cascade=options.cascaded_delete,
+            )
         except WitsmlError as exc:
             await self._record_audit(
                 principal,
@@ -1442,7 +1448,12 @@ class WitsmlStoreService:
         return result
 
     async def _delete(
-        self, principal: Principal, *, object_type: str, query_xml: str
+        self,
+        principal: Principal,
+        *,
+        object_type: str,
+        query_xml: str,
+        cascade: bool = False,
     ) -> StoreResult:
         if object_type not in WRITABLE_TYPES:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
@@ -1496,29 +1507,15 @@ class WitsmlStoreService:
 
             if not partial:
                 deleted_element = stored
-                await self._assert_no_children(object_type, existing)
-                if object_type == "well":
-                    await self._wells.delete(uid)
-                elif object_type == "wellbore":
-                    await self._wellbores.delete(uid, uid_well)
-                elif object_type == "log":
-                    await self._logs.delete(uid, uid_well, uid_wellbore)
-                elif object_type == "mudLog":
-                    await self._mud_logs.delete(uid, uid_well, uid_wellbore)
-                else:
-                    await self._trajectories.delete(uid, uid_well, uid_wellbore)
-                await self._change_log.add(
-                    ChangeLogRecord(
-                        uid=uid,
-                        object_type=object_type,
-                        change_type="delete",
-                        change_date=now,
-                        uid_well=uid_well,
-                        uid_wellbore=uid_wellbore,
-                        name_object=xd.text_of(deleted_element, "name"),
-                        name_well=xd.text_of(deleted_element, "nameWell"),
-                        name_wellbore=xd.text_of(deleted_element, "nameWellbore"),
+                if cascade:
+                    deleted += await self._delete_cascade(
+                        principal, object_type, existing, now
                     )
+                else:
+                    await self._assert_no_children(object_type, existing)
+                await self._delete_record(object_type, existing)
+                await self._record_delete(
+                    object_type, existing, now, deleted_element
                 )
                 deleted += 1
                 continue
@@ -1684,6 +1681,102 @@ class WitsmlStoreService:
             return
         if has_children:
             raise WitsmlError(WmlsCode.NOT_BOTTOM_LEVEL)
+
+    async def _delete_record(self, object_type: str, record: StoredObject) -> None:
+        """Elimina una fila concreta sin comprobar hijos ni registrar changeLog."""
+        if object_type == "well":
+            await self._wells.delete(record.uid)
+        elif object_type == "wellbore":
+            await self._wellbores.delete(record.uid, record.uid_well)
+        elif object_type == "log":
+            await self._logs.delete(record.uid, record.uid_well, record.uid_wellbore)
+        elif object_type == "mudLog":
+            await self._mud_logs.delete(
+                record.uid, record.uid_well, record.uid_wellbore
+            )
+        else:
+            await self._trajectories.delete(
+                record.uid, record.uid_well, record.uid_wellbore
+            )
+
+    async def _record_delete(
+        self,
+        object_type: str,
+        record: StoredObject,
+        now: datetime,
+        element: etree._Element | None = None,
+    ) -> None:
+        stored = element if element is not None else parse_xml(record.xml)
+        xd.ensure_namespace(stored)
+        await self._change_log.add(
+            ChangeLogRecord(
+                uid=record.uid,
+                object_type=object_type,
+                change_type="delete",
+                change_date=now,
+                uid_well=record.uid_well,
+                uid_wellbore=record.uid_wellbore,
+                name_object=xd.text_of(stored, "name"),
+                name_well=xd.text_of(stored, "nameWell"),
+                name_wellbore=xd.text_of(stored, "nameWellbore"),
+            )
+        )
+
+    async def _wellbore_children(
+        self, uid_well: str | None, uid_wellbore: str
+    ) -> list[tuple[str, StoredObject]]:
+        """Hijos directos de un wellbore en orden de borrado."""
+        children: list[tuple[str, StoredObject]] = []
+        for object_type, repository in (
+            ("log", self._logs),
+            ("mudLog", self._mud_logs),
+            ("trajectory", self._trajectories),
+        ):
+            records = await repository.list(
+                ListFilter(uid_well=uid_well, uid_wellbore=uid_wellbore)
+            )
+            children.extend((object_type, record) for record in records)
+        return children
+
+    async def _cascade_plan(
+        self, object_type: str, record: StoredObject
+    ) -> list[tuple[str, StoredObject]]:
+        """Objetos dependientes que deben borrarse antes que ``record``."""
+        if object_type == "well":
+            plan: list[tuple[str, StoredObject]] = []
+            wellbores = await self._wellbores.list(
+                ListFilter(uid_well=record.uid)
+            )
+            for wellbore in wellbores:
+                plan.extend(
+                    await self._wellbore_children(
+                        wellbore.uid_well, wellbore.uid
+                    )
+                )
+                plan.append(("wellbore", wellbore))
+            return plan
+        if object_type == "wellbore":
+            return await self._wellbore_children(record.uid_well, record.uid)
+        return []
+
+    async def _delete_cascade(
+        self,
+        principal: Principal,
+        object_type: str,
+        record: StoredObject,
+        now: datetime,
+    ) -> int:
+        """Borra los dependientes de ``record`` y devuelve cuántos eliminó."""
+        plan = await self._cascade_plan(object_type, record)
+        for child_type, child in plan:
+            if not principal.allows_witsml(
+                WitsmlAction.DELETE, child_type, child.uid_well
+            ):
+                raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
+        for child_type, child in plan:
+            await self._delete_record(child_type, child)
+            await self._record_delete(child_type, child, now)
+        return len(plan)
 
     @staticmethod
     def _samples_from_rows(

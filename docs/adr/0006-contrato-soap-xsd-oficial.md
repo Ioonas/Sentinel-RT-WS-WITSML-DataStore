@@ -47,14 +47,21 @@
   con `uidObject`, `nameWell`/`nameWellbore`/`nameObject`, `objectType`,
   `lastChangeType` y `changeHistory`, sin atributos no previstos por el XSD. Los
   nombres contextuales se persisten para sobrevivir al borrado del objeto.
+- `DeleteFromStore` acepta `cascadedDelete=true` (capacidad publicada por
+  `GetCap`): el servidor comprueba permisos sobre todos los dependientes y los
+  elimina en orden `well -> wellbore -> log/trajectory/mudLog`, registrando una
+  entrada `delete` por objeto. Sin la opción, un padre con hijos sigue
+  devolviendo `-432` (`NOT_BOTTOM_LEVEL`). La cascada se resuelve en la capa de
+  aplicación, no con `ON DELETE CASCADE` de PostgreSQL.
 
 ## Consecuencias
 
 - Cambiar de versión de WITSML exige reemplazar el árbol `schemas/witsml/` y
   revisar los ADR; no se parchean los XSD.
-- Queda pendiente ejecutar formalmente la suite `wPCTT1.1-t1.0-s1.0` y decidir,
-  con el Test Plan, si `GetCap` sin `dataVersion` debe devolver `-423`; hasta
-  entonces se mantiene la tolerancia documentada.
+- La suite oficial `wPCTT1.1-t1.0-s1.0` se ejecuta contra este contrato; la
+  evidencia y los hashes se archivan en `certification/README.md`.
+- Queda pendiente decidir, con el Test Plan, si `GetCap` sin `dataVersion` debe
+  devolver `-423`; hasta entonces se mantiene la tolerancia documentada.
 - La certificación Energistics y los trámites comerciales quedan fuera del
   alcance de desarrollo.
 

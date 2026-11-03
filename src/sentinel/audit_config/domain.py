@@ -40,7 +40,7 @@ class ServerConfig:
     growing_timeout_seconds: int = 3_600
     change_detection_seconds: int = 60
     max_request_latest_values: int = 500
-    cascaded_delete: bool = False
+    cascaded_delete: bool = True
     support_uom_conversion: bool = False
     updated_at: datetime | None = None
     updated_by: str | None = None

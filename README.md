@@ -135,8 +135,8 @@ decisiones pendientes están en `docs/adr/0006-contrato-soap-xsd-oficial.md`.
 Los MUST del Test Plan que la suite no ejecuta se cubren con pruebas propias y su
 trazabilidad está en `docs/adr/0007-pruebas-propias-d15.md`. La suite oficial
 `wPCTT1.1-t1.0-s1.0` se ejecutó completa sobre esta configuración con 0 fallos
-(74 scripts aprobados y 1 omitido, `test22`, porque `cascadedDelete=false`); la
-evidencia y los hashes están en `certification/README.md`. La certificación
+(75 scripts aprobados, 0 omitidos, incluido `test22` con `cascadedDelete=true`);
+la evidencia y los hashes están en `certification/README.md`. La certificación
 Energistics no forma parte del desarrollo.
 
 Regla de dependencias: `witsml_application`, `identity_access`,
@@ -161,5 +161,6 @@ Las pruebas de integración requieren PostgreSQL y se activan con
   almacenan como SHA-256 y son de un solo uso.
 - Autorización en cada endpoint y en cada operación WMLS; denegación por
   defecto.
-- Borrado sin cascada (`cascadedDelete=false`) y registro en `changeLog`.
+- Borrado en cascada solo con `cascadedDelete=true`; sin la opción, un padre con
+  hijos devuelve `-432`. Cada objeto eliminado se registra en `changeLog`.
 - XML sin DTD, entidades externas ni acceso a red (lxml endurecido).

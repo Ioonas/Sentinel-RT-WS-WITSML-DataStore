@@ -25,7 +25,8 @@ identificador del Test Plan o el criterio de aceptación que cubre.
 | 84 | `test_d15_84_client_compression_is_not_advertised` | Sin `compressionMethod` en `GetCap`; solicitud comprimida rechazada con fault 400. |
 | 19 | `test_wmls_gzip_responses` + pruebas de `GetCap` | Negociación de compresión de respuesta conforme al criterio 19. |
 | 6 y 7 | Pruebas existentes de `GetCap` e `id-only` | Capacidades publicadas y consultas de solo identificación. |
-| -432 | Pruebas existentes de borrado con hijos | `cascadedDelete=false` y rechazo sin borrado en cascada. |
+| 22 | `test_wmls_cascaded_delete_removes_descendants` | `cascadedDelete=true` elimina `well -> wellbore -> log/trajectory/mudLog` y registra `delete` por objeto. |
+| -432 | `test_wmls_discovery_and_crud` + `test_wmls_cascaded_delete_removes_descendants` | Sin `cascadedDelete=true`, el padre con hijos se rechaza con `-432`. |
 | Criterio 12 | `test_d15_82_*` | Actualización parcial preserva curvas omitidas y distingue append de modificación interior. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y nodos con el mismo índice rechazados con `-463` sin sobrescribir. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4 objetos) | El objeto creado por SOAP se lee por REST y el borrado por REST se refleja en SOAP. |

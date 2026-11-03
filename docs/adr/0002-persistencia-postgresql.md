@@ -20,14 +20,17 @@
 ## Consecuencias
 
 - Una operación WMLS con varios objetos es atómica.
-- El borrado de un padre con hijos devuelve `-432` (`NOT_BOTTOM_LEVEL`) y no
-  elimina nada en cascada.
+- Sin `cascadedDelete=true`, el borrado de un padre con hijos devuelve `-432`
+  (`NOT_BOTTOM_LEVEL`). Con la opción, la capa de aplicación elimina primero los
+  dependientes y registra un `delete` en `changeLog` por cada objeto; las FK de
+  PostgreSQL no eliminan filas.
 - Los tests de integración usan una base separada (`sentinel_test`) y recrean
   el esquema con `Base.metadata`.
 
 ## Alternativas descartadas
 
-- Cascada en base de datos: contradice `cascadedDelete=false` y el requisito de
-  ChangeLog explícito.
+- Cascada en base de datos: se descarta porque la cascada WITSML debe comprobar
+  permisos y registrar `changeLog` explícito; `ON DELETE CASCADE` no puede
+  hacerlo sin perder trazabilidad.
 - Almacenar XML como único dato: impide filtrar por pozo, nombre o rango de
   índices sin cargar todos los documentos.

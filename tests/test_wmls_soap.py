@@ -45,6 +45,11 @@ def result(response) -> int:
     return int(field(response, "Result"))
 
 
+def object_count(xml_out: str, name: str) -> int:
+    root = etree.fromstring(xml_out.encode("utf-8"))
+    return sum(1 for element in root.iter() if etree.QName(element).localname == name)
+
+
 async def soap(
     client: AsyncClient,
     operation: str,
@@ -168,7 +173,7 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     assert cap_server is not None
     assert cap_server.get("apiVers") == "1.4.1"
     assert cap_server.findtext(f"{{{API_NS}}}schemaVersion") == "1.4.1.1"
-    assert cap_server.findtext(f"{{{API_NS}}}cascadedDelete") == "false"
+    assert cap_server.findtext(f"{{{API_NS}}}cascadedDelete") == "true"
     assert cap_server.findtext(f"{{{API_NS}}}supportUomConversion") == "false"
     # D-01: compressionMethod no se declara; solo describe compresión de
     # solicitudes y las respuestas se comprimen según Accept-Encoding.
@@ -590,6 +595,179 @@ async def test_wmls_gzip_responses(admin_client: AsyncClient, csrf: str) -> None
     assert refused.status_code == 200
     assert "content-encoding" not in refused.headers
     assert field(refused, "Result") == "1.4.1.1"
+
+
+async def test_wmls_cascaded_delete_removes_descendants(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    """Test Plan 22: ``cascadedDelete=true`` elimina los objetos dependientes."""
+    secret = await create_writer(admin_client, csrf)
+    for object_type, xml in (
+        ("well", WELL),
+        ("wellbore", WELLBORE),
+        ("log", LOG),
+        ("trajectory", TRAJECTORY),
+        ("mudLog", MUDLOG),
+    ):
+        added = await soap(
+            admin_client,
+            "WMLS_AddToStore",
+            secret,
+            {"WMLtypeIn": object_type, "XMLin": xml, "OptionsIn": ""},
+        )
+        assert result(added) == 1, (object_type, field(added, "SuppMsgOut"))
+
+    deleted = await soap(
+        admin_client,
+        "WMLS_DeleteFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-1"/></wells>',
+            "OptionsIn": "cascadedDelete=true",
+        },
+    )
+    assert result(deleted) == 1, field(deleted, "SuppMsgOut")
+
+    reads = (
+        ("well", "well", f'<wells xmlns="{WITSML_NS}"><well uid="w-1"/></wells>'),
+        (
+            "wellbore",
+            "wellbore",
+            f'<wellbores xmlns="{WITSML_NS}"><wellbore uidWell="w-1"/></wellbores>',
+        ),
+        (
+            "log",
+            "log",
+            f'<logs xmlns="{WITSML_NS}"><log uidWell="w-1" '
+            'uidWellbore="wb-1"/></logs>',
+        ),
+        (
+            "mudLog",
+            "mudLog",
+            f'<mudLogs xmlns="{WITSML_NS}"><mudLog uidWell="w-1" '
+            'uidWellbore="wb-1"/></mudLogs>',
+        ),
+        (
+            "trajectory",
+            "trajectory",
+            f'<trajectorys xmlns="{WITSML_NS}"><trajectory uidWell="w-1" '
+            'uidWellbore="wb-1"/></trajectorys>',
+        ),
+    )
+    for object_type, element_name, query in reads:
+        read = await soap(
+            admin_client,
+            "WMLS_GetFromStore",
+            secret,
+            {
+                "WMLtypeIn": object_type,
+                "QueryIn": query,
+                "OptionsIn": "returnElements=id-only",
+            },
+        )
+        assert result(read) == 1, object_type
+        assert object_count(field(read, "XMLout"), element_name) == 0, object_type
+
+    change_log = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "changeLog",
+            "QueryIn": f'<changeLogs xmlns="{WITSML_NS}"/>',
+            "OptionsIn": "",
+        },
+    )
+    assert result(change_log) == 1
+    root = etree.fromstring(field(change_log, "XMLout").encode("utf-8"))
+    deleted_uids = {
+        entry.get("uidObject")
+        for entry in root.iter()
+        if etree.QName(entry).localname == "changeLog"
+        and any(
+            etree.QName(child).localname == "lastChangeType"
+            and (child.text or "") == "delete"
+            for child in entry
+        )
+    }
+    assert {"w-1", "wb-1", "log-1", "mud-1", "tr-1"} <= deleted_uids
+
+    # La cascada también funciona cuando se solicita sobre un wellbore.
+    well_two = (
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well uid="w-2">'
+        "<name>Well Two</name></well></wells>"
+    )
+    wellbore_two = (
+        f'<wellbores xmlns="{WITSML_NS}" version="1.4.1.1">'
+        '<wellbore uid="wb-2" uidWell="w-2">'
+        "<nameWell>Well Two</nameWell><name>WB Two</name>"
+        "</wellbore></wellbores>"
+    )
+    log_two = (
+        f'<logs xmlns="{WITSML_NS}" version="1.4.1.1">'
+        '<log uid="log-2" uidWell="w-2" uidWellbore="wb-2">'
+        "<nameWell>Well Two</nameWell><nameWellbore>WB Two</nameWellbore>"
+        "<name>Log Two</name><indexType>measured depth</indexType>"
+        '<startIndex uom="m">0</startIndex><endIndex uom="m">1</endIndex>'
+        "<indexCurve>MD</indexCurve>"
+        '<logCurveInfo uid="c1"><mnemonic>MD</mnemonic><unit>m</unit>'
+        "<typeLogData>double</typeLogData></logCurveInfo>"
+        "<logData><mnemonicList>MD</mnemonicList><unitList>m</unitList>"
+        "<data>0</data><data>1</data></logData></log></logs>"
+    )
+    for object_type, xml in (
+        ("well", well_two),
+        ("wellbore", wellbore_two),
+        ("log", log_two),
+    ):
+        added = await soap(
+            admin_client,
+            "WMLS_AddToStore",
+            secret,
+            {"WMLtypeIn": object_type, "XMLin": xml, "OptionsIn": ""},
+        )
+        assert result(added) == 1, (object_type, field(added, "SuppMsgOut"))
+
+    deleted_wb = await soap(
+        admin_client,
+        "WMLS_DeleteFromStore",
+        secret,
+        {
+            "WMLtypeIn": "wellbore",
+            "QueryIn": f'<wellbores xmlns="{WITSML_NS}">'
+            '<wellbore uid="wb-2" uidWell="w-2"/></wellbores>',
+            "OptionsIn": "cascadedDelete=true",
+        },
+    )
+    assert result(deleted_wb) == 1, field(deleted_wb, "SuppMsgOut")
+
+    read_log_two = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "log",
+            "QueryIn": f'<logs xmlns="{WITSML_NS}"><log uid="log-2" '
+            'uidWell="w-2" uidWellbore="wb-2"/></logs>',
+            "OptionsIn": "returnElements=id-only",
+        },
+    )
+    assert result(read_log_two) == 1
+    assert object_count(field(read_log_two, "XMLout"), "log") == 0
+
+    read_well_two = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-2"/></wells>',
+            "OptionsIn": "returnElements=id-only",
+        },
+    )
+    assert result(read_well_two) == 1
+    assert object_count(field(read_well_two, "XMLout"), "well") == 1
 
 
 async def test_read_outputs_conform_to_official_xsd(
