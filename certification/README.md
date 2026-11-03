@@ -285,9 +285,32 @@ No se modifican los scripts oficiales ni los XSD. Cada corrección debe ir
 acompañada de una prueba propia que reproduzca el caso y de una nueva ejecución
 completa de la suite.
 
+## 8. Revocar la cuenta de certificación
+
+Al terminar la evaluación formal, deshabilitar la cuenta `wcat.certification` y
+revocar su credencial. Con la misma sesión de superadministrador de la sección 1:
+
+```powershell
+$headers = @{ "X-CSRF-Token" = $session.Cookies["sentinel_csrf"].Value }
+
+Invoke-RestMethod -Method Patch `
+  -Uri "http://localhost:8000/admin-api/v1/service-accounts/$($account.id)" `
+  -ContentType "application/json" `
+  -Headers $headers -WebSession $session `
+  -Body '{"enabled": false}'
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/admin-api/v1/service-accounts/$($account.id)/revoke-credential" `
+  -Headers $headers -WebSession $session
+```
+
+Anotar en el expediente la fecha y hora de la revocación. No registrar el valor
+de la credencial en ningún documento.
+
 ## Criterio de cierre
 
 - Suite ejecutada de principio a fin sin fallos.
 - `results/` y manifiesto de hashes archivados como evidencia.
 - ADR/README actualizados si cambia una decisión de contrato.
+- Cuenta `wcat.certification` deshabilitada y credencial revocada (sección 8).
 - Release `1.0.3` etiquetado y expediente listo para la evaluación formal.

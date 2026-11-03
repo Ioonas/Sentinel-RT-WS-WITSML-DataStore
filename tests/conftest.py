@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from collections.abc import AsyncIterator
 
 import pytest
@@ -19,7 +20,11 @@ TEST_DSN = os.getenv(
     "postgresql+asyncpg://sentinel_test:sentinel_test@localhost:5432/sentinel_test",
 )
 
-ADMIN_PASSWORD = "Sentinel-Dev-2026"
+# Contraseña de prueba generada en cada ejecución; no se versiona ningún valor.
+ADMIN_PASSWORD = os.getenv(
+    "SENTINEL_TEST_ADMIN_PASSWORD",
+    f"Sentinel-Test-{secrets.token_urlsafe(12)}",
+)
 CONTACT = {"contact_email": "ops@example.com", "contact_phone": "+1 555 0100"}
 
 
