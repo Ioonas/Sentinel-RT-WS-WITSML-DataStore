@@ -35,6 +35,7 @@ from sentinel.persistence.tables import (
     LogRow,
     LogSampleRow,
     MailOutboxRow,
+    MudLogRow,
     PasswordResetRow,
     ServerConfigRow,
     ServiceAccountRow,
@@ -48,6 +49,7 @@ from sentinel.witsml_application.domain.models import (
     LogCurve,
     LogRecord,
     LogSample,
+    MudLogRecord,
     TrajectoryRecord,
     TrajectoryStation,
     WellboreRecord,
@@ -144,6 +146,24 @@ def _to_log(row: LogRow) -> LogRecord:
 
 def _to_trajectory(row: TrajectoryRow) -> TrajectoryRecord:
     return TrajectoryRecord(
+        uid=row.uid,
+        uid_well=row.uid_well,
+        uid_wellbore=row.uid_wellbore,
+        name=row.name,
+        xml=row.xml,
+        fields=row.fields or {},
+        created_at=row.d_tim_creation,
+        changed_at=row.d_tim_last_change,
+        growing_until=row.growing_until,
+        db_id=row.id,
+        md_min=row.md_min,
+        md_max=row.md_max,
+        md_uom=row.md_uom,
+    )
+
+
+def _to_mudlog(row: MudLogRow) -> MudLogRecord:
+    return MudLogRecord(
         uid=row.uid,
         uid_well=row.uid_well,
         uid_wellbore=row.uid_wellbore,
@@ -283,7 +303,7 @@ class SqlAlchemyWellboreRepository:
         await self._session.execute(stmt)
 
     async def has_children(self, uid: str, uid_well: str | None = None) -> bool:
-        for model in (LogRow, TrajectoryRow):
+        for model in (LogRow, TrajectoryRow, MudLogRow):
             stmt = select(model.id).where(
                 func.lower(model.uid_wellbore) == uid.lower()
             )
@@ -737,6 +757,67 @@ class SqlAlchemyTrajectoryRepository:
                 )
             )
         await self._session.flush()
+
+
+class SqlAlchemyMudLogRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+    ) -> MudLogRecord | None:
+        stmt = select(MudLogRow).where(func.lower(MudLogRow.uid) == uid.lower())
+        if uid_well:
+            stmt = stmt.where(func.lower(MudLogRow.uid_well) == uid_well.lower())
+        if uid_wellbore:
+            stmt = stmt.where(
+                func.lower(MudLogRow.uid_wellbore) == uid_wellbore.lower()
+            )
+        row = await self._session.scalar(stmt)
+        return _to_mudlog(row) if row else None
+
+    async def list(self, filters: ListFilter) -> list[MudLogRecord]:
+        stmt = _apply_text_filters(select(MudLogRow), MudLogRow, filters)
+        stmt = stmt.order_by(MudLogRow.id)
+        if filters.limit:
+            stmt = stmt.limit(filters.limit)
+        rows = (await self._session.scalars(stmt)).all()
+        return [_to_mudlog(row) for row in rows]
+
+    async def add(self, record: MudLogRecord) -> None:
+        row = MudLogRow(
+            identity_key=identity_key(
+                "mudLog", record.uid, record.uid_well, record.uid_wellbore
+            ),
+            md_min=record.md_min,
+            md_max=record.md_max,
+            md_uom=record.md_uom,
+        )
+        _apply_common(row, record)
+        self._session.add(row)
+        await self._session.flush()
+        record.db_id = row.id
+
+    async def update(self, record: MudLogRecord) -> None:
+        row = await self._session.get(MudLogRow, record.db_id)
+        if row is None:
+            raise LookupError("mudLog no encontrado para actualizar")
+        _apply_common(row, record)
+        row.md_min = record.md_min
+        row.md_max = record.md_max
+        row.md_uom = record.md_uom
+
+    async def delete(
+        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+    ) -> None:
+        stmt = delete(MudLogRow).where(func.lower(MudLogRow.uid) == uid.lower())
+        if uid_well:
+            stmt = stmt.where(func.lower(MudLogRow.uid_well) == uid_well.lower())
+        if uid_wellbore:
+            stmt = stmt.where(
+                func.lower(MudLogRow.uid_wellbore) == uid_wellbore.lower()
+            )
+        await self._session.execute(stmt)
 
 
 class SqlAlchemyChangeLogRepository:
@@ -1301,6 +1382,7 @@ class SqlAlchemyRepositories:
         self.wells = SqlAlchemyWellRepository(session)
         self.wellbores = SqlAlchemyWellboreRepository(session)
         self.logs = SqlAlchemyLogRepository(session)
+        self.mud_logs = SqlAlchemyMudLogRepository(session)
         self.trajectories = SqlAlchemyTrajectoryRepository(session)
         self.change_log = SqlAlchemyChangeLogRepository(session)
         self.audit = SqlAlchemyAuditRepository(session)

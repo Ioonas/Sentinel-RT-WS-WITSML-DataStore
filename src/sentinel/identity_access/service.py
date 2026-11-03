@@ -425,7 +425,14 @@ class IdentityService:
         if not grants:
             raise ValidationError("La cuenta de servicio requiere al menos un permiso.")
         for grant in grants:
-            if grant.object_type not in ("*", "well", "wellbore", "log", "trajectory"):
+            if grant.object_type not in (
+                "*",
+                "well",
+                "wellbore",
+                "log",
+                "mudLog",
+                "trajectory",
+            ):
                 raise ValidationError(f"Tipo de objeto no soportado: {grant.object_type}")
             if role == ServiceRole.READER and grant.action != WitsmlAction.READ:
                 raise ValidationError(

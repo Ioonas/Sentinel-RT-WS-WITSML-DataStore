@@ -34,7 +34,12 @@ class SoapRequest:
 
 
 def parse_soap_request(payload: bytes, soap_action: str | None = None) -> SoapRequest:
-    root = parse_xml(payload)
+    try:
+        root = parse_xml(payload)
+    except ValidationError as exc:
+        # Cualquier cuerpo ilegible (incluido uno comprimido no anunciado) se
+        # informa como fault SOAP 400, no como error de validación JSON.
+        raise SoapEnvelopeError(f"XML inválido: {exc}") from exc
     if etree.QName(root).localname != "Envelope":
         raise SoapEnvelopeError("El documento no es un Envelope SOAP 1.1.")
     body = root.find(f"{SOAP}Body")

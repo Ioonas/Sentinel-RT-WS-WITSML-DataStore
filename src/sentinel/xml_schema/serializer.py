@@ -29,6 +29,7 @@ CAPABILITY_FUNCTIONS: tuple[
         (
             ("changeLog", False, False),
             ("log", True, True),
+            ("mudLog", True, False),
             ("trajectory", True, False),
             ("well", False, False),
             ("wellbore", False, False),
@@ -38,6 +39,7 @@ CAPABILITY_FUNCTIONS: tuple[
         "WMLS_AddToStore",
         (
             ("log", True, True),
+            ("mudLog", True, False),
             ("trajectory", True, False),
             ("well", False, False),
             ("wellbore", False, False),
@@ -47,6 +49,7 @@ CAPABILITY_FUNCTIONS: tuple[
         "WMLS_UpdateInStore",
         (
             ("log", True, True),
+            ("mudLog", True, False),
             ("trajectory", True, False),
             ("well", False, False),
             ("wellbore", False, False),
@@ -56,6 +59,7 @@ CAPABILITY_FUNCTIONS: tuple[
         "WMLS_DeleteFromStore",
         (
             ("log", True, True),
+            ("mudLog", True, False),
             ("trajectory", True, False),
             ("well", False, False),
             ("wellbore", False, False),
@@ -124,7 +128,7 @@ def build_capabilities(config: ServerConfig) -> str:
     etree.SubElement(server, f"{API}maxRequestLatestValues").text = str(
         config.max_request_latest_values
     )
-    for data_object in ("log", "trajectory"):
+    for data_object in ("log", "mudLog", "trajectory"):
         etree.SubElement(
             server,
             f"{API}growingTimeoutPeriod",

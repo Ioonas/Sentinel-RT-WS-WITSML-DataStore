@@ -13,6 +13,7 @@ from sentinel.witsml_application.ports import (
     ChangeLogRepositoryPort,
     ListFilter,
     LogRepositoryPort,
+    MudLogRepositoryPort,
     TrajectoryRepositoryPort,
     WellboreRepositoryPort,
     WellRepositoryPort,
@@ -41,12 +42,14 @@ class InventoryService:
         wells: WellRepositoryPort,
         wellbores: WellboreRepositoryPort,
         logs: LogRepositoryPort,
+        mud_logs: MudLogRepositoryPort,
         trajectories: TrajectoryRepositoryPort,
         change_log: ChangeLogRepositoryPort,
     ) -> None:
         self._wells = wells
         self._wellbores = wellbores
         self._logs = logs
+        self._mud_logs = mud_logs
         self._trajectories = trajectories
         self._change_log = change_log
 
@@ -114,6 +117,12 @@ class InventoryService:
                     ListFilter(uid_well=uid_well, uid_wellbore=uid)
                 )
             ]
+            result += [
+                f"mudLog:{child.uid}"
+                for child in await self._mud_logs.list(
+                    ListFilter(uid_well=uid_well, uid_wellbore=uid)
+                )
+            ]
             return result
         return []
 
@@ -141,6 +150,8 @@ class InventoryService:
             await self._wellbores.delete(uid, uid_well)
         elif object_type == "log":
             await self._logs.delete(uid, uid_well, uid_wellbore)
+        elif object_type == "mudLog":
+            await self._mud_logs.delete(uid, uid_well, uid_wellbore)
         else:
             await self._trajectories.delete(uid, uid_well, uid_wellbore)
         await self._change_log.add(
@@ -163,6 +174,7 @@ class InventoryService:
             "well": self._wells,
             "wellbore": self._wellbores,
             "log": self._logs,
+            "mudLog": self._mud_logs,
             "trajectory": self._trajectories,
         }[object_type]
 
@@ -179,6 +191,8 @@ class InventoryService:
             return await self._wellbores.get(uid, uid_well)
         if object_type == "log":
             return await self._logs.get(uid, uid_well, uid_wellbore)
+        if object_type == "mudLog":
+            return await self._mud_logs.get(uid, uid_well, uid_wellbore)
         if object_type == "trajectory":
             return await self._trajectories.get(uid, uid_well, uid_wellbore)
         raise NotFoundError("Tipo de objeto no soportado.")

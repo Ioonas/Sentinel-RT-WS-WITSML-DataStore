@@ -117,6 +117,18 @@ TRAJECTORY = (
     '<incl uom="dega">0</incl><azi uom="dega">0</azi>'
     "</trajectoryStation></trajectory></trajectorys>"
 )
+MUDLOG = (
+    f'<mudLogs xmlns="{WITSML_NS}" version="1.4.1.1">'
+    '<mudLog uid="mud-1" uidWell="w-1" uidWellbore="wb-1">'
+    "<nameWell>Well One</nameWell><nameWellbore>WB One</nameWellbore>"
+    "<name>MudLog One</name><objectGrowing>true</objectGrowing>"
+    '<startMd uom="m">0</startMd><endMd uom="m">10</endMd>'
+    '<parameter uid="p1"><type>core interval comment</type>'
+    '<mdTop uom="m">0</mdTop><mdBottom uom="m">10</mdBottom></parameter>'
+    '<geologyInterval uid="g1"><typeLithology>cuttings</typeLithology>'
+    '<mdTop uom="m">0</mdTop><mdBottom uom="m">10</mdBottom></geologyInterval>'
+    "</mudLog></mudLogs>"
+)
 
 
 TIME_LOG = (
@@ -167,7 +179,7 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     growing = {}
     for element in cap_server.findall(f"{{{API_NS}}}growingTimeoutPeriod"):
         growing[element.get("dataObject")] = element.text
-    assert growing == {"log": "3600", "trajectory": "3600"}
+    assert growing == {"log": "3600", "mudLog": "3600", "trajectory": "3600"}
 
     functions = {
         element.get("name"): element
@@ -186,22 +198,32 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
         element.text: element
         for element in functions["WMLS_GetFromStore"].findall(f"{{{API_NS}}}dataObject")
     }
-    assert set(read_objects) == {"changeLog", "log", "trajectory", "well", "wellbore"}
+    assert set(read_objects) == {
+        "changeLog",
+        "log",
+        "mudLog",
+        "trajectory",
+        "well",
+        "wellbore",
+    }
     assert read_objects["log"].get("maxDataNodes") == "10000"
     assert read_objects["log"].get("maxDataPoints") == "3000000"
+    assert read_objects["mudLog"].get("maxDataNodes") == "10000"
+    assert read_objects["mudLog"].get("maxDataPoints") is None
     assert read_objects["trajectory"].get("maxDataNodes") == "10000"
     assert read_objects["trajectory"].get("maxDataPoints") is None
     write_objects = {
         element.text: element
         for element in functions["WMLS_AddToStore"].findall(f"{{{API_NS}}}dataObject")
     }
-    assert set(write_objects) == {"log", "trajectory", "well", "wellbore"}
+    assert set(write_objects) == {"log", "mudLog", "trajectory", "well", "wellbore"}
 
     for object_type, xml in (
         ("well", WELL),
         ("wellbore", WELLBORE),
         ("log", LOG),
         ("trajectory", TRAJECTORY),
+        ("mudLog", MUDLOG),
     ):
         added = await soap(
             admin_client,
@@ -283,7 +305,7 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
                 f'<logs xmlns="{WITSML_NS}">'
                 '<log uid="log-1" uidWell="w-1" uidWellbore="wb-1"/></logs>'
             ),
-            "OptionsIn": "",
+            "OptionsIn": "returnElements=all",
         },
     )
     assert result(log_read) == 1
@@ -307,6 +329,11 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
             "log",
             f'<logs xmlns="{WITSML_NS}"><log uid="log-1" uidWell="w-1" '
             'uidWellbore="wb-1"/></logs>',
+        ),
+        (
+            "mudLog",
+            f'<mudLogs xmlns="{WITSML_NS}"><mudLog uid="mud-1" uidWell="w-1" '
+            'uidWellbore="wb-1"/></mudLogs>',
         ),
         (
             "trajectory",
@@ -413,7 +440,7 @@ async def test_update_log_accepts_official_index_type_alias(
         {
             "WMLtypeIn": "well",
             "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-3"/></wells>',
-            "OptionsIn": "",
+            "OptionsIn": "returnElements=all",
         },
     )
     assert result(stored) == 1
@@ -535,7 +562,7 @@ async def test_published_wsdl_is_official(admin_client: AsyncClient) -> None:
 
 
 async def test_wmls_gzip_responses(admin_client: AsyncClient, csrf: str) -> None:
-    """D-01: las respuestas WMLS usan gzip cuando el cliente lo acepta."""
+    """D-01, Test Plan 83 y criterio 19: gzip de respuesta cuando se acepta."""
     secret = await create_writer(admin_client, csrf)
     credentials = base64.b64encode(f"acme.writer:{secret}".encode()).decode()
     headers = {

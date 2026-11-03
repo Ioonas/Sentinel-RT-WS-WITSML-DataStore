@@ -67,7 +67,13 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     HumanRole.ADMIN.value: frozenset(),
 }
 
-SUPPORTED_WITSML_OBJECTS: tuple[str, ...] = ("well", "wellbore", "log", "trajectory")
+SUPPORTED_WITSML_OBJECTS: tuple[str, ...] = (
+    "well",
+    "wellbore",
+    "log",
+    "mudLog",
+    "trajectory",
+)
 
 
 @dataclass(frozen=True)

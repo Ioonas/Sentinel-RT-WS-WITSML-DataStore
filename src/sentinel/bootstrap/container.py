@@ -84,6 +84,7 @@ class Container:
                 wells=repos.wells,
                 wellbores=repos.wellbores,
                 logs=repos.logs,
+                mud_logs=repos.mud_logs,
                 trajectories=repos.trajectories,
                 change_log=repos.change_log,
                 config=config,
@@ -96,6 +97,7 @@ class Container:
                 wells=repos.wells,
                 wellbores=repos.wellbores,
                 logs=repos.logs,
+                mud_logs=repos.mud_logs,
                 trajectories=repos.trajectories,
                 change_log=repos.change_log,
             )

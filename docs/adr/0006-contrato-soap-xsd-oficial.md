@@ -27,6 +27,13 @@
   `application/x-www-form-urlencoded` (`dataVersion=1.4.1.1&returnElements=...`)
   y, por compatibilidad, como XML legado. Un `dataVersion` presente distinto de
   `1.4.1.1` devuelve `-423`; su ausencia se tolera.
+- `returnElements=requested` es el valor por defecto del API: la respuesta de
+  `GetFromStore` contiene solo los elementos y atributos escritos en la
+  plantilla de consulta, más `name`/`nameWell`/`nameWellbore` para conservar la
+  identidad y validar contra el XSD normativo de lectura. `all` trata la
+  plantilla como si pidiera todos los elementos; los modos restantes
+  (`id-only`, `header-only`, `data-only`, `station-location-only`) mantienen su
+  conjunto propio y añaden la selección explícita.
 - La validación usa la variante XSD de cada operación: `generated_write` en
   alta, `generated_update` en actualización y `xsd_schemas` en lectura. Las
   respuestas de `GetFromStore` se validan contra el esquema de lectura en las

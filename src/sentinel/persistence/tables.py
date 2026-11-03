@@ -139,6 +139,17 @@ class TrajectoryStationRow(Base):
     )
 
 
+class MudLogRow(WitsmlObjectMixin, Base):
+    __tablename__ = "mud_logs"
+    md_min: Mapped[Decimal | None] = mapped_column(Numeric(38, 15))
+    md_max: Mapped[Decimal | None] = mapped_column(Numeric(38, 15))
+    md_uom: Mapped[str | None] = mapped_column(String(32))
+    __table_args__ = (
+        Index("ix_mud_logs_uid_well_wellbore", "uid_well", "uid_wellbore"),
+        Index("ix_mud_logs_uid", "uid"),
+    )
+
+
 class ChangeLogRow(Base):
     __tablename__ = "change_log"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

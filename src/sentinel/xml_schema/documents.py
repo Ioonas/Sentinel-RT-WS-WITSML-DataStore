@@ -22,7 +22,11 @@ from sentinel.xml_schema.objects import ObjectSpec, spec_for
 
 SERVER_MANAGED_ATTRIBUTES = frozenset({"dTimCreation", "dTimLastChange"})
 SERVER_MANAGED_CHILDREN = frozenset({"objectGrowing"})
-DATA_CHILDREN = frozenset({"logData", "logCurveInfo", "trajectoryStation"})
+DATA_CHILDREN = frozenset(
+    {"logData", "logCurveInfo", "trajectoryStation", "geologyInterval", "parameter"}
+)
+#: Nodos de datos de ``mudLog`` (objeto de crecimiento aleatorio).
+MUDLOG_DATA_CHILDREN = ("parameter", "geologyInterval")
 SERVER_MANAGED_ALL = SERVER_MANAGED_ATTRIBUTES | SERVER_MANAGED_CHILDREN
 
 TEXT_FILTERS: dict[str, tuple[str, ...]] = {
@@ -44,6 +48,7 @@ TEXT_FILTERS: dict[str, tuple[str, ...]] = {
         "shape",
     ),
     "log": ("name", "indexType", "serviceCompany"),
+    "mudLog": ("name", "mudLogCompany", "mudLogEngineers"),
     "trajectory": ("name", "serviceCompany"),
 }
 
@@ -258,6 +263,96 @@ def parse_wellbore_fields(element: etree._Element) -> dict[str, Any]:
     }
 
 
+def parse_mudlog_fields(element: etree._Element) -> dict[str, Any]:
+    return {
+        name: value
+        for name in TEXT_FILTERS["mudLog"]
+        if (value := text_of(element, name)) is not None
+    }
+
+
+def mudlog_md_range(
+    element: etree._Element,
+) -> tuple[Decimal | None, Decimal | None, str | None]:
+    """Rango estructural declarado por ``startMd``/``endMd``."""
+    start = child(element, "startMd")
+    end = child(element, "endMd")
+    md_min = _decimal(start.text if start is not None else None)
+    md_max = _decimal(end.text if end is not None else None)
+    uom = start.get("uom") if start is not None else None
+    return md_min, md_max, uom
+
+
+def parse_object_growing(element: etree._Element) -> bool:
+    """Lee ``objectGrowing`` sin confundirlo con un campo administrado."""
+    return _boolean_text(text_of(element, "objectGrowing")) is True
+
+
+def mudlog_data_nodes(element: etree._Element) -> list[etree._Element]:
+    return [item for item in element if localname(item) in MUDLOG_DATA_CHILDREN]
+
+
+def merge_mudlog_nodes(
+    merged: etree._Element, incoming: etree._Element
+) -> bool:
+    """Fusiona ``parameter`` y ``geologyInterval`` por ``uid``.
+
+    Un nodo existente se actualiza campo a campo; uno nuevo se inserta en el
+    orden del XSD. Devuelve ``True`` si la actualización trae nodos de datos.
+    """
+    changed = False
+    for source in mudlog_data_nodes(incoming):
+        name = localname(source)
+        uid = normalize_uid(attr(source, "uid"))
+        target = None
+        if uid:
+            for candidate in children(merged, name):
+                if normalize_uid(attr(candidate, "uid")) == uid:
+                    target = candidate
+                    break
+        if target is None:
+            _insert_ordered(merged, copy.deepcopy(source), _MUDLOG_CHILD_ORDER)
+        else:
+            merge_header(target, source)
+        changed = True
+    return changed
+
+
+def filter_mudlog_md_range(
+    element: etree._Element, md_min: Decimal | None, md_max: Decimal | None
+) -> None:
+    """Descarta nodos de datos fuera del rango MD solicitado."""
+    if md_min is None and md_max is None:
+        return
+    for node in mudlog_data_nodes(element):
+        values = [
+            value
+            for value in (_child_decimal(node, "mdTop"), _child_decimal(node, "mdBottom"))
+            if value is not None
+        ]
+        if not values:
+            continue
+        low, high = min(values), max(values)
+        if (md_min is not None and high < md_min) or (
+            md_max is not None and low > md_max
+        ):
+            element.remove(node)
+
+
+def trim_mudlog_nodes(element: etree._Element, allowed: int) -> bool:
+    """Recorta los nodos de datos que exceden el presupuesto de la respuesta."""
+    nodes = mudlog_data_nodes(element)
+    if allowed <= 0:
+        for node in nodes:
+            element.remove(node)
+        return bool(nodes)
+    if len(nodes) <= allowed:
+        return False
+    for node in nodes[allowed:]:
+        element.remove(node)
+    return True
+
+
 def parse_log_header(element: etree._Element) -> LogHeader:
     index_type = normalize_index_type(text_of(element, "indexType"))
     if not index_type:
@@ -404,6 +499,23 @@ def _decimal(raw: str | None) -> Decimal | None:
         raise ValidationError(f"Valor numérico inválido: {raw}") from exc
 
 
+@dataclass(frozen=True)
+class SelectionItem:
+    """Elemento pedido explícitamente en la plantilla de consulta.
+
+    ``returnElements=requested`` (el valor por defecto del API) devuelve sólo
+    los elementos y atributos escritos en la plantilla. Los hijos se modelan en
+    árbol para respetar selecciones anidadas como
+    ``<commonData><dTimLastChange/></commonData>``. Un elemento sin hijos
+    selecciona el nodo completo (por ejemplo ``<parameter uid="..."/>``), y
+    ``uid`` permite emparejar nodos repetidos.
+    """
+
+    name: str
+    uid: str | None = None
+    children: tuple[SelectionItem, ...] = ()
+
+
 @dataclass
 class ObjectQuery:
     uid: str | None = None
@@ -421,11 +533,12 @@ class ObjectQuery:
     changed_after: datetime | None = None
     object_growing: bool | None = None
     selection_items: frozenset[str] = frozenset()
+    selection: tuple[SelectionItem, ...] = ()
 
 
 @dataclass(frozen=True)
 class QueryOptions:
-    return_elements: str = "all"
+    return_elements: str = "requested"
     request_latest_values: int | None = None
     max_return_nodes: int | None = None
     request_object_selection: bool = False
@@ -459,7 +572,9 @@ def option_value(options: str | None, name: str) -> str | None:
 
 
 def parse_options(options_xml: str | None) -> QueryOptions:
-    return_elements = (option_value(options_xml, "returnElements") or "all").lower()
+    return_elements = (
+        option_value(options_xml, "returnElements") or "requested"
+    ).lower()
     latest = option_value(options_xml, "requestLatestValues")
     max_nodes = option_value(options_xml, "maxReturnNodes")
     selection = option_value(options_xml, "requestObjectSelectionCapability")
@@ -541,6 +656,7 @@ def _parse_query_element(
     changed_after = _common_datetime(common, "dTimLastChange")
     latest = attr(element, "requestLatestValues")
     selection_items = _selection_items(element)
+    selection = _selection_tree(element)
     object_growing = _boolean_text(text_of(element, "objectGrowing"))
 
     if object_type == "changeLog":
@@ -562,6 +678,7 @@ def _parse_query_element(
             created_after=created_after,
             changed_after=changed_after,
             selection_items=selection_items,
+            selection=selection,
         )
 
     start_index = _index_filter(element, ("startIndex", "startDateTimeIndex"), index_type)
@@ -582,6 +699,7 @@ def _parse_query_element(
         changed_after=changed_after,
         object_growing=object_growing,
         selection_items=selection_items,
+        selection=selection,
     )
 
 
@@ -610,6 +728,18 @@ def _selection_items(element: etree._Element) -> frozenset[str]:
     if common is not None and child(common, "dTimLastChange") is not None:
         items.add("dTimLastChange")
     return frozenset(items)
+
+
+def _selection_tree(element: etree._Element) -> tuple[SelectionItem, ...]:
+    """Árbol de elementos pedidos explícitamente en la plantilla."""
+    return tuple(
+        SelectionItem(
+            name=localname(item),
+            uid=normalize_uid(attr(item, "uid")),
+            children=_selection_tree(item),
+        )
+        for item in element
+    )
 
 
 def _common_datetime(common: etree._Element | None, name: str) -> datetime | None:
@@ -695,6 +825,8 @@ def _order_for(element: etree._Element) -> tuple[str, ...] | None:
     name = localname(element)
     if name == "log":
         return _LOG_CHILD_ORDER
+    if name in ("mudLog", "mudLogs"):
+        return _MUDLOG_CHILD_ORDER
     if name in ("trajectory", "trajectorys"):
         return _TRAJECTORY_CHILD_ORDER
     return None
@@ -725,7 +857,7 @@ def apply_server_fields(
     _set_common_data_text(common, "dTimCreation", format_datetime(created_at))
     _set_common_data_text(common, "dTimLastChange", format_datetime(changed_at))
     name = localname(element)
-    if name in ("log", "trajectory"):
+    if name in ("log", "trajectory", "mudLog"):
         value = "true" if growing else "false"
         existing = child(element, "objectGrowing")
         if existing is not None:
@@ -809,6 +941,23 @@ _LOG_CHILD_ORDER: tuple[str, ...] = (
     "logParam",
     "logCurveInfo",
     "logData",
+    "commonData",
+    "customData",
+)
+
+_MUDLOG_CHILD_ORDER: tuple[str, ...] = (
+    "nameWell",
+    "nameWellbore",
+    "name",
+    "objectGrowing",
+    "dTim",
+    "mudLogCompany",
+    "mudLogEngineers",
+    "startMd",
+    "endMd",
+    "relatedLog",
+    "parameter",
+    "geologyInterval",
     "commonData",
     "customData",
 )
@@ -930,7 +1079,12 @@ def strip_data_children(element: etree._Element) -> None:
 def strip_payload(element: etree._Element) -> None:
     """Elimina solo los bloques de datos masivos, conservando la metadata."""
     for item in list(element):
-        if localname(item) in ("logData", "trajectoryStation"):
+        if localname(item) in (
+            "logData",
+            "trajectoryStation",
+            "geologyInterval",
+            "parameter",
+        ):
             element.remove(item)
 
 
@@ -945,9 +1099,9 @@ def validate_object_element(
     uid = normalize_uid(attr(element, "uid"))
     if require_uid and object_type != "well" and not uid:
         raise ValidationError(f"{object_type} requiere uid.")
-    if object_type in ("wellbore", "log", "trajectory") and not attr(element, "uidWell"):
+    if object_type in ("wellbore", "log", "trajectory", "mudLog") and not attr(element, "uidWell"):
         raise ValidationError(f"{object_type} requiere uidWell.")
-    if object_type in ("log", "trajectory") and not attr(element, "uidWellbore"):
+    if object_type in ("log", "trajectory", "mudLog") and not attr(element, "uidWellbore"):
         raise ValidationError(f"{object_type} requiere uidWellbore.")
     if object_type == "log":
         index_type = normalize_index_type(text_of(element, "indexType"))
@@ -989,9 +1143,12 @@ def apply_return_elements(
     element: etree._Element,
     mode: str,
     selection_items: frozenset[str] = frozenset(),
+    selection: tuple[SelectionItem, ...] = (),
 ) -> etree._Element:
     result = copy.deepcopy(element)
-    if mode == "id-only":
+    if mode == "requested":
+        _project_selection(result, selection, keep_required=True)
+    elif mode == "id-only":
         allowed = _ID_ONLY_CHILDREN | selection_items
         for item in list(result):
             if localname(item) not in allowed:
@@ -1005,7 +1162,12 @@ def apply_return_elements(
     elif mode == "header-only":
         strip_payload(result)
     elif mode == "data-only":
-        allowed = {"logData", "trajectoryStation"} | selection_items
+        allowed = {
+            "logData",
+            "trajectoryStation",
+            "geologyInterval",
+            "parameter",
+        } | selection_items
         for item in list(result):
             if localname(item) not in allowed:
                 result.remove(item)
@@ -1019,6 +1181,46 @@ def apply_return_elements(
                 if localname(item) not in _STATION_LOCATION_CHILDREN:
                     station.remove(item)
     return result
+
+
+def _match_selection(
+    element: etree._Element, candidates: list[SelectionItem]
+) -> SelectionItem | None:
+    uid = normalize_uid(attr(element, "uid"))
+    if uid:
+        for candidate in candidates:
+            if candidate.uid is not None and candidate.uid.lower() == uid.lower():
+                return candidate
+    for candidate in candidates:
+        if candidate.uid is None:
+            return candidate
+    return None
+
+
+def _project_selection(
+    stored: etree._Element,
+    selection: tuple[SelectionItem, ...],
+    *,
+    keep_required: bool = False,
+) -> None:
+    """Deja en ``stored`` sólo los elementos pedidos en la plantilla.
+
+    Los atributos del objeto se conservan: son la identidad mínima que el
+    cliente necesita para correlacionar la respuesta. El nombre del objeto y de
+    sus padres se mantiene para que la respuesta siga validando contra el XSD
+    normativo, igual que hace ``id-only``. Un elemento de selección sin hijos se
+    devuelve completo; uno con hijos se proyecta recursivamente.
+    """
+    for item in list(stored):
+        name = localname(item)
+        if keep_required and name in _ID_ONLY_CHILDREN:
+            continue
+        candidates = [entry for entry in selection if entry.name == name]
+        match = _match_selection(item, candidates)
+        if match is None:
+            stored.remove(item)
+        elif match.children:
+            _project_selection(item, match.children)
 
 
 def apply_selection_capability(element: etree._Element) -> etree._Element:

@@ -16,6 +16,7 @@ from sentinel.witsml_application.domain.models import (
     LogCurve,
     LogRecord,
     LogSample,
+    MudLogRecord,
     TrajectoryRecord,
     TrajectoryStation,
     WellboreRecord,
@@ -134,6 +135,22 @@ class LogRepositoryPort(Protocol):
         """Devuelve ``(insertadas, actualizadas)``."""
 
     async def replace_curves(self, log_uid: str, curves: list[LogCurve]) -> None: ...
+
+
+class MudLogRepositoryPort(Protocol):
+    async def get(
+        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+    ) -> MudLogRecord | None: ...
+
+    async def list(self, filters: ListFilter) -> list[MudLogRecord]: ...
+
+    async def add(self, record: MudLogRecord) -> None: ...
+
+    async def update(self, record: MudLogRecord) -> None: ...
+
+    async def delete(
+        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+    ) -> None: ...
 
 
 class TrajectoryRepositoryPort(Protocol):

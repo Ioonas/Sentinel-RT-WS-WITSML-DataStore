@@ -26,6 +26,7 @@ from sentinel.witsml_application.domain.models import (
     LogCurve,
     LogRecord,
     LogSample,
+    MudLogRecord,
     StoredObject,
     TrajectoryRecord,
     TrajectoryStation,
@@ -36,6 +37,7 @@ from sentinel.witsml_application.ports import (
     ChangeLogRepositoryPort,
     ListFilter,
     LogRepositoryPort,
+    MudLogRepositoryPort,
     SchemaValidatorPort,
     StoreResult,
     TrajectoryRepositoryPort,
@@ -64,6 +66,7 @@ class WitsmlStoreService:
         wells: WellRepositoryPort,
         wellbores: WellboreRepositoryPort,
         logs: LogRepositoryPort,
+        mud_logs: MudLogRepositoryPort,
         trajectories: TrajectoryRepositoryPort,
         change_log: ChangeLogRepositoryPort,
         config: ConfigService,
@@ -75,6 +78,7 @@ class WitsmlStoreService:
         self._wells = wells
         self._wellbores = wellbores
         self._logs = logs
+        self._mud_logs = mud_logs
         self._trajectories = trajectories
         self._change_log = change_log
         self._config = config
@@ -169,7 +173,7 @@ class WitsmlStoreService:
                 WmlsCode.INVALID_KEYWORD_VALUE,
                 f"returnElements no soportado: {mode}",
             )
-        growing = object_type in ("log", "trajectory")
+        growing = object_type in ("log", "trajectory", "mudLog")
         if mode in ("header-only", "data-only") and not growing:
             raise WitsmlError(WmlsCode.INVALID_OPTION_FOR_GROWING_ONLY)
         if mode == "station-location-only" and object_type != "trajectory":
@@ -275,6 +279,16 @@ class WitsmlStoreService:
         used = 1
         mode = options.return_elements
         wants_data = mode not in ("header-only", "id-only")
+        if mode == "requested":
+            selected = {item.name for item in query.selection}
+            if isinstance(record, LogRecord):
+                wants_data = "logData" in selected
+            elif isinstance(record, TrajectoryRecord):
+                wants_data = "trajectoryStation" in selected
+            elif isinstance(record, MudLogRecord):
+                wants_data = bool(selected & {"geologyInterval", "parameter"})
+            else:
+                wants_data = False
 
         if isinstance(record, LogRecord):
             latest = query.latest_values or options.request_latest_values
@@ -359,10 +373,23 @@ class WitsmlStoreService:
             for old in xd.children(element, "trajectoryStation"):
                 element.remove(old)
             self._apply_trajectory_header(record, element, [])
+        elif isinstance(record, MudLogRecord):
+            if wants_data:
+                xd.filter_mudlog_md_range(element, query.md_min, query.md_max)
+                allowed = max(0, budget)
+                if options.max_return_nodes is not None:
+                    allowed = min(allowed, options.max_return_nodes)
+                truncated = xd.trim_mudlog_nodes(element, allowed)
+                used = len(xd.mudlog_data_nodes(element)) or 1
+            else:
+                used = 1
 
         return (
             xd.apply_return_elements(
-                element, options.return_elements, query.selection_items
+                element,
+                options.return_elements,
+                query.selection_items,
+                query.selection,
             ),
             used,
             truncated,
@@ -836,9 +863,15 @@ class WitsmlStoreService:
 
             uid = xd.normalize_uid(xd.attr(element, "uid")) or self._ids.new_uid()
             element.set("uid", uid)
+            # ``mudLog`` es de crecimiento aleatorio: se conserva el
+            # ``objectGrowing`` declarado por el cliente en el alta. Debe leerse
+            # antes de ``strip_server_fields``, que lo elimina.
+            incoming_growing = (
+                xd.parse_object_growing(element) if object_type == "mudLog" else False
+            )
             xd.strip_server_fields(element)
             xd.apply_server_fields(
-                element, created_at=now, changed_at=now, growing=False
+                element, created_at=now, changed_at=now, growing=incoming_growing
             )
 
             if object_type == "well":
@@ -915,6 +948,35 @@ class WitsmlStoreService:
                 await self._logs.add(record)  # type: ignore[arg-type]
                 if samples:
                     await self._logs.upsert_samples(uid, samples, header.index_type)
+            elif object_type == "mudLog":
+                await self._require_parent("wellbore", uid_wellbore or "", uid_well)
+                md_min, md_max, md_uom = xd.mudlog_md_range(element)
+                nodes = len(xd.mudlog_data_nodes(element))
+                self._enforce_write_limits(config, nodes, 1)
+                growing_until = (
+                    now + timedelta(seconds=config.growing_timeout_seconds)
+                    if incoming_growing
+                    else None
+                )
+                xml = serialize(element)
+                record = MudLogRecord(
+                    uid=uid,
+                    uid_well=uid_well,
+                    uid_wellbore=uid_wellbore,
+                    name=xd.text_of(element, "name"),
+                    xml=xml,
+                    fields=xd.parse_mudlog_fields(element),
+                    created_at=now,
+                    changed_at=now,
+                    growing_until=growing_until,
+                    md_min=md_min,
+                    md_max=md_max,
+                    md_uom=md_uom,
+                )
+                await self._ensure_unique(
+                    self._mud_logs, uid, uid_well, uid_wellbore
+                )
+                await self._mud_logs.add(record)
             else:
                 await self._require_parent("wellbore", uid_wellbore or "", uid_well)
                 header = xd.parse_trajectory_header(element)
@@ -1046,13 +1108,18 @@ class WitsmlStoreService:
                 growing_until, history = await self._update_trajectory(
                     existing, element, merged, now, config
                 )
+            elif isinstance(existing, MudLogRecord):
+                growing_until, history = self._update_mudlog(
+                    existing, element, merged, now, config
+                )
 
             changed = now
             growing = growing_until is not None and growing_until > now
             xd.apply_server_fields(
                 merged, created_at=existing.created_at, changed_at=changed, growing=growing
             )
-            xd.strip_payload(merged)
+            if not isinstance(existing, MudLogRecord):
+                xd.strip_payload(merged)
             existing.xml = serialize(merged)
             existing.changed_at = changed
             existing.growing_until = growing_until
@@ -1081,6 +1148,28 @@ class WitsmlStoreService:
         return StoreResult(
             code=int(WmlsCode.SUCCESS), supp_msg=xd.make_supp_msg(uids)
         )
+
+    def _update_mudlog(
+        self,
+        record: MudLogRecord,
+        incoming: etree._Element,
+        merged: etree._Element,
+        now: datetime,
+        config: Any,
+    ) -> tuple[datetime | None, ChangeLogHistoryView]:
+        """Fusiona nodos de datos de un ``mudLog`` por ``uid``.
+
+        ``mudLog`` crece de forma aleatoria: la actualización de un
+        ``geologyInterval`` o ``parameter`` extiende el periodo de crecimiento.
+        """
+        history = ChangeLogHistoryView(change_date=now, change_type="update")
+        growing_until = record.growing_until
+        if xd.merge_mudlog_nodes(merged, incoming):
+            nodes = len(xd.mudlog_data_nodes(merged))
+            self._enforce_write_limits(config, nodes, 1)
+            growing_until = now + timedelta(seconds=config.growing_timeout_seconds)
+        record.md_min, record.md_max, record.md_uom = xd.mudlog_md_range(merged)
+        return growing_until, history
 
     async def _update_log(
         self,
@@ -1168,6 +1257,9 @@ class WitsmlStoreService:
         if len({self._sample_key(sample) for sample in samples}) != len(samples):
             raise WitsmlError(WmlsCode.NODES_WITH_SAME_INDEX)
         self._enforce_write_limits(config, len(samples), max(1, len(record.curves)))
+        # §6.7.4.6 de la API 1.4.1: se limpia por canal el rango implícito de la
+        # actualización, no el startIndex/endIndex del encabezado.
+        await self._clear_updated_channels(record, samples)
 
         old_end = record.end_index
         old_start = record.start_index
@@ -1224,6 +1316,40 @@ class WitsmlStoreService:
             timeout = timedelta(seconds=config.growing_timeout_seconds)
             return now + timeout, history
         return record.growing_until, history
+
+    async def _clear_updated_channels(
+        self, record: LogRecord, samples: list[LogSample]
+    ) -> None:
+        """Limpieza por canal del §6.7.4.6 de la API 1.4.1.
+
+        Cada curva se limpia entre el menor y el mayor índice donde la
+        actualización trae valor para esa curva; las filas ausentes de ese
+        rango quedan en nulo y las curvas omitidas no se tocan. Un append
+        conserva los valores fuera de su rango implícito y una modificación
+        interior borra el valor previo del índice no informado.
+        """
+        ranges: dict[str, tuple[Any, Any]] = {}
+        for sample in samples:
+            index = (
+                sample.index_time
+                if record.index_type == "time"
+                else sample.index_value
+            )
+            if index is None:
+                continue
+            for mnemonic, value in sample.values.items():
+                if mnemonic == record.index_curve or value in (None, ""):
+                    continue
+                current = ranges.get(mnemonic)
+                if current is None:
+                    ranges[mnemonic] = (index, index)
+                    continue
+                low, high = current
+                ranges[mnemonic] = (min(low, index), max(high, index))
+        for mnemonic, (low, high) in ranges.items():
+            await self._logs.remove_curve_values(
+                record.uid, mnemonic, start=low, end=high
+            )
 
     async def _update_trajectory(
         self,
@@ -1358,7 +1484,15 @@ class WitsmlStoreService:
             start, end = xd.index_bounds(element)
             has_range = xd.has_index_bounds(element)
             is_log = isinstance(existing, LogRecord)
-            partial = attribute_changed or (is_log and (curve_mnemonics or has_range))
+            is_mudlog = isinstance(existing, MudLogRecord)
+            mudlog_nodes = (
+                xd.mudlog_data_nodes(element) if is_mudlog else []
+            )
+            partial = (
+                attribute_changed
+                or (is_log and (curve_mnemonics or has_range))
+                or (is_mudlog and bool(mudlog_nodes))
+            )
 
             if not partial:
                 deleted_element = stored
@@ -1369,6 +1503,8 @@ class WitsmlStoreService:
                     await self._wellbores.delete(uid, uid_well)
                 elif object_type == "log":
                     await self._logs.delete(uid, uid_well, uid_wellbore)
+                elif object_type == "mudLog":
+                    await self._mud_logs.delete(uid, uid_well, uid_wellbore)
                 else:
                     await self._trajectories.delete(uid, uid_well, uid_wellbore)
                 await self._change_log.add(
@@ -1412,6 +1548,21 @@ class WitsmlStoreService:
                 elif has_range:
                     await self._logs.delete_samples(uid, start=start, end=end)
                 await self._refresh_log_range(record)
+            elif is_mudlog:
+                record = existing  # type: ignore[assignment]
+                assert isinstance(record, MudLogRecord)
+                for node in mudlog_nodes:
+                    name = xd.localname(node)
+                    node_uid = xd.normalize_uid(xd.attr(node, "uid"))
+                    for candidate in list(xd.children(stored, name)):
+                        if node_uid and (
+                            xd.normalize_uid(xd.attr(candidate, "uid")) != node_uid
+                        ):
+                            continue
+                        stored.remove(candidate)
+                record.md_min, record.md_max, record.md_uom = xd.mudlog_md_range(
+                    stored
+                )
 
             fields = self._fields_for(object_type, stored)
             existing.xml = serialize(stored)
@@ -1470,6 +1621,7 @@ class WitsmlStoreService:
             "well": self._wells,
             "wellbore": self._wellbores,
             "log": self._logs,
+            "mudLog": self._mud_logs,
             "trajectory": self._trajectories,
         }[object_type]
 
@@ -1486,6 +1638,8 @@ class WitsmlStoreService:
             return await self._wellbores.get(uid, uid_well)
         if object_type == "log":
             return await self._logs.get(uid, uid_well, uid_wellbore)
+        if object_type == "mudLog":
+            return await self._mud_logs.get(uid, uid_well, uid_wellbore)
         return await self._trajectories.get(uid, uid_well, uid_wellbore)
 
     async def _update_repository(self, object_type: str, record: StoredObject) -> None:
@@ -1495,6 +1649,8 @@ class WitsmlStoreService:
             await self._wellbores.update(record)  # type: ignore[arg-type]
         elif object_type == "log":
             await self._logs.update(record)  # type: ignore[arg-type]
+        elif object_type == "mudLog":
+            await self._mud_logs.update(record)  # type: ignore[arg-type]
         else:
             await self._trajectories.update(record)  # type: ignore[arg-type]
 
@@ -1614,6 +1770,8 @@ class WitsmlStoreService:
             return xd.parse_wellbore_fields(element)
         if object_type == "log":
             return xd.parse_log_header(element).fields
+        if object_type == "mudLog":
+            return xd.parse_mudlog_fields(element)
         return xd.parse_trajectory_header(element).fields
 
     @staticmethod

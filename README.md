@@ -8,8 +8,9 @@ dominio, autorización, persistencia PostgreSQL y auditoría.
 
 - WMLS `GetVersion`, `GetCap`, `GetBaseMsg`, `GetFromStore`, `AddToStore`,
   `UpdateInStore` y `DeleteFromStore` sobre SOAP 1.1 con HTTP Basic.
-- Objetos WITSML: `well`, `wellbore`, `log`, `trajectory`, incluidos datos de
-  curva y estaciones de trayectoria, crecimiento y `changeLog` de solo lectura.
+- Objetos WITSML: `well`, `wellbore`, `log`, `trajectory` y `mudLog`,
+  incluidos datos de curva, estaciones de trayectoria, intervalos de geología,
+  parámetros de lodo, crecimiento y `changeLog` de solo lectura.
 - API administrativa `/admin-api/v1`: primer arranque, sesión humana con cookie
   segura y CSRF, invitaciones, recuperación, usuarios, cuentas de servicio,
   credenciales de un solo uso, roles/acceso, inventario, borrado explícito,
@@ -17,8 +18,8 @@ dominio, autorización, persistencia PostgreSQL y auditoría.
 - Arquitectura de puertos y adaptadores: el núcleo no importa FastAPI,
   SQLAlchemy ni SMTP.
 
-Quedan fuera del MVP: `mudLog`, conversión UOM, suscripciones push, ETP,
-paginación propietaria y edición manual de XML.
+Quedan fuera del MVP: conversión UOM, suscripciones push, ETP, paginación
+propietaria y edición manual de XML.
 
 ## Requisitos
 
@@ -131,9 +132,12 @@ Los namespaces oficiales son `/wsdl/120`, `/message/120` y
 usa `ReturnValueIn` (con `ErrorCodeIn` como compatibilidad). Los detalles y las
 decisiones pendientes están en `docs/adr/0006-contrato-soap-xsd-oficial.md`.
 
-Queda pendiente la ejecución formal de la suite oficial
-`wPCTT1.1-t1.0-s1.0` y la decisión sobre `GetCap` sin `dataVersion`; la
-certificación Energistics no forma parte del desarrollo.
+Los MUST del Test Plan que la suite no ejecuta se cubren con pruebas propias y su
+trazabilidad está en `docs/adr/0007-pruebas-propias-d15.md`. La suite oficial
+`wPCTT1.1-t1.0-s1.0` se ejecutó completa sobre esta configuración con 0 fallos
+(74 scripts aprobados y 1 omitido, `test22`, porque `cascadedDelete=false`); la
+evidencia y los hashes están en `certification/README.md`. La certificación
+Energistics no forma parte del desarrollo.
 
 Regla de dependencias: `witsml_application`, `identity_access`,
 `xml_schema`, `audit_config` y `shared` no importan `persistence`,

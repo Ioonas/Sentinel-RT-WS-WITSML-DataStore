@@ -14,7 +14,7 @@ class StrictModel(BaseModel):
 
 
 class GrantIn(StrictModel):
-    object_type: str = Field(pattern=r"^(well|wellbore|log|trajectory|\*)$")
+    object_type: str = Field(pattern=r"^(well|wellbore|log|mudLog|trajectory|\*)$")
     action: WitsmlAction
     uid_well: str | None = None
 

@@ -125,15 +125,20 @@ Copiar `results/log_<fecha>.txt`, su `_soap.txt` y `witsml_result.txt` a
 `certification/manifests/` (también ignorado):
 
 ```powershell
-$src  = "D:\Descargas-J\Docs\wPCTT1.1-t1.0-s1.0\results"
-$dest = "certification/results"
+$src   = "D:\Descargas-J\Docs\wPCTT1.1-t1.0-s1.0\results"
+$dest  = "certification/results"
+$stamp = Get-Date -Format "yyyyMMdd"
 New-Item -ItemType Directory -Force -Path $dest, "certification/manifests" | Out-Null
 Copy-Item "$src\log_2026*.txt" -Exclude "*_soap.txt" $dest -Force
 Copy-Item "$src\log_2026*_soap.txt" $dest -Force
-Copy-Item "$src\witsml_result.txt" "$dest\wpctt_witsml_result.txt" -Force
+Copy-Item "$src\witsml_result.txt" "$dest\wpctt_witsml_result_$stamp.txt" -Force
 
-$stamp = Get-Date -Format "yyyyMMdd"
-Get-ChildItem $dest -File | Sort-Object Name | ForEach-Object {
+# Hashear solo los artefactos de esta ejecución para no invalidar
+# manifiestos anteriores.
+$files = Get-ChildItem $dest -File |
+  Where-Object { $_.LastWriteTime.Date -eq (Get-Date).Date } |
+  Sort-Object Name
+$files | ForEach-Object {
   "{0}  results/{1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
 } | Set-Content "certification/manifests/wpctt_$stamp.sha256" -Encoding ascii
 ```
@@ -148,22 +153,59 @@ Get-Content $log | Select-String "completed: (Pass|Fail|Skipped)" |
   ForEach-Object { ($_.Line -split ': ')[-1] } | Group-Object | Format-Table
 ```
 
+### 5.1 Manifiesto de la suite instalada (criterio 33)
+
+El expediente incluye el hash de cada archivo instalado y un hash agregado:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\certification\generar_manifiesto_suite.ps1 `
+  -ToolHome "D:\Descargas-J\Docs\wPCTT1.1-t1.0-s1.0"
+```
+
+El script escribe `certification/manifests/suite_<aaaaMMdd>.sha256` con una
+línea `<sha256>  <ruta relativa>` por archivo, en orden, y una última línea
+`# aggregate-sha256: <hash>`. El hash agregado es el SHA-256 de esas líneas
+ordenadas. Se excluyen `results/` y `server/backup-*/`; no se modifica ningún
+script, WSDL ni XSD oficial.
+
 ## 6. Evidencia archivada
 
 | Ejecución | Suite | Duración | Scripts | Fallos | Resultado |
 | --- | --- | --- | --- | --- | --- |
-| `log_20261101203643`<br>(2026-11-01 20:36, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 79 min 42 s | 70 pass, 6 skipped | 0 | `!*** SUCCESS` |
+| `log_20261103134009`<br>(2026-11-03 13:40, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 82 min 35 s | 74 pass, 1 skipped | 0 | `!*** SUCCESS` |
+| `log_20261101203643`<br>(2026-11-01 20:36, hora local de la herramienta) | `wPCTT1.1-t1.0-s1.0` / `testsuite` | 79 min 42 s | 70 pass, 6 skipped | 0 | `!*** SUCCESS` (histórica) |
 
-Esta ejecución es la que certifica la configuración publicada: `maxDataPoints`
-3 000 000, `growingTimeoutPeriod` 3 600 s, `changeDetectionPeriod` 60 s
-(D-17) y respuestas gzip según `Accept-Encoding`, sin `compressionMethod` en
-`GetCap` (D-01). Se ejecutó con el dataset estándar recién cargado y con
-`data_grower_script` publicando en `Energistics-w1-wb1-log-0001` y
-`Energistics-w1-wb1-trajectory-0001` durante toda la suite.
+La ejecución del **2026-11-03** es la que certifica la configuración publicada:
+`maxDataPoints` 3 000 000, `growingTimeoutPeriod` 3 600 s,
+`changeDetectionPeriod` 60 s (D-17) y respuestas gzip según `Accept-Encoding`,
+sin `compressionMethod` en `GetCap` (D-01). Además incorpora `mudLog` como
+objeto de primera clase, por lo que la suite ejecuta y aprueba `test34`,
+`test61`, `test63`, `test92b` y `test94e`. Se ejecutó con el dataset estándar
+recién cargado y con `data_grower_script` publicando en
+`Energistics-w1-wb1-log-0001` y `Energistics-w1-wb1-trajectory-0001` durante
+toda la suite.
 
-Los 6 scripts omitidos corresponden a objetos fuera del alcance 1.0.3
-(`mudLog` y afines) que la suite salta por capacidades no declaradas. Artefactos
-y manifiesto local (ignorados por Git):
+El único script omitido es `test22`, que exige `cascadedDelete=true`; el Store
+declara `false` (decisión vigente) y el borrado no en cascada se cubre con la
+prueba propia del código `-432` (D-15). La ejecución del 2026-11-01 se conserva
+como evidencia histórica previa a `mudLog`; en ella los 6 scripts omitidos
+correspondían a objetos fuera del alcance 1.0.3.
+
+Artefactos de la ejecución vigente y manifiestos locales (ignorados por Git):
+
+- `certification/results/log_20261103134009.txt`
+  — `e656281a9193a09b61ade13919466e9318133bd224182b392f406b937579adc5`
+- `certification/results/log_20261103134009_soap.txt`
+  — `9310eabb3e0a52c3464c520157518271e3a88fff83eea2e3dc91193e2bea3865`
+- `certification/results/wpctt_witsml_result_20261103.txt`
+  — `674455f910ac34c00a67e925258221f04b411428246b18407ef34f4d438e2698`
+- `certification/manifests/wpctt_20261103.sha256`
+- `certification/manifests/suite_20261103.sha256`
+  (4 179 archivos, `# aggregate-sha256:
+  25a88acc328a35d355a1fd76e361a8276d1168535339623d61a7762f2bc09f0d`)
+
+Evidencia histórica del 2026-11-01:
 
 - `certification/results/log_20261101203643.txt`
   — `2b8390ab588dac1d401d064812f7c3a6168e6c3caeac99aa7e18719546890531`
@@ -190,6 +232,31 @@ respete. Declarar 60 s ahorra ~117 minutos de espera (13 pausas) sin alterar la
 semántica. Si en la evaluación formal se exige el valor de 600 s, basta
 actualizar `server_config.change_detection_seconds` (o el valor por defecto de
 `ServerConfig`) y repetir la suite: no hay cambios de código asociados.
+
+### 6.2 Pruebas propias D-15 y criterios 12, 13, 19, 29 y 36
+
+Además de la suite oficial, el expediente incluye pruebas automatizadas para los
+MUST que la herramienta no ejecuta. La trazabilidad completa está en
+`docs/adr/0007-pruebas-propias-d15.md`; el resumen es:
+
+| Test Plan / criterio | Prueba | Evidencia |
+| --- | --- | --- |
+| 12 y 13 | `test_d15_12_13_change_log_keeps_update_and_delete_entries` | Entradas `update` y `delete` consultables con el filtro SQ-018. |
+| 74 y 75 | `test_d15_74_*`, `test_d15_75_*` | Truncamiento por `maxDataNodes` y `maxDataPoints` con código `+2`, sin duplicados. |
+| 76c | `test_d15_76c_request_latest_values_for_decreasing_log` | Últimos valores de un log descendente y rechazo `-1054` fuera de límite. |
+| 82 | `test_d15_82_log_append_and_intersection_clearing_behavior` | *Clearing behavior* de la API §6.7.4.6 y criterio 12. |
+| 83 y criterio 19 | `test_wmls_gzip_responses` | Gzip de respuesta, `Vary` y rechazo de identidad. |
+| 84 | `test_d15_84_client_compression_is_not_advertised` | Sin `compressionMethod` en `GetCap`; solicitud comprimida con fault 400. |
+| 6, 7 y 19 | Pruebas existentes de `GetCap` e `id-only` | Capacidades publicadas y consultas de identificación. |
+| `-432` | Pruebas existentes de borrado con hijos | `cascadedDelete=false` sin borrado en cascada. |
+| Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y duplicados rechazados con `-463`. |
+| Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4) | Lectura por REST de un alta SOAP y borrado REST visible por SOAP. |
+
+La retención de 24 h de las pruebas 12 y 13 no se espera: D-10 fija 5 años sin
+purga, así que la prueba comprueba que la entrada sigue consultable con el mismo
+filtro. El *clearing* por canal se implementó en
+`WitsmlApplicationService._clear_updated_channels` y el transporte SOAP ahora
+devuelve un fault 400 ante un cuerpo ilegible o comprimido.
 
 ## 7. Triaje
 

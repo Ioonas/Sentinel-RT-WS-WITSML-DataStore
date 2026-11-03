@@ -24,6 +24,9 @@ OBJECT_SPECS: dict[str, ObjectSpec] = {
     "log": ObjectSpec(
         "log", "logs", writable=True, supports_growing=True, parent="wellbore"
     ),
+    "mudLog": ObjectSpec(
+        "mudLog", "mudLogs", writable=True, supports_growing=True, parent="wellbore"
+    ),
     "trajectory": ObjectSpec(
         "trajectory", "trajectorys", writable=True, supports_growing=True,
         parent="wellbore",

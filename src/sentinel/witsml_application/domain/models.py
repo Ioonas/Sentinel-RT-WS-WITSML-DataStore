@@ -99,6 +99,22 @@ class TrajectoryStation:
     xml: str
 
 
+@dataclass
+class MudLogRecord(StoredObject):
+    """Mud log completo.
+
+    ``mudLog`` es un objeto de crecimiento aleatorio: los nodos de datos
+    (``parameter`` y ``geologyInterval``) viven dentro del XML canónico, por lo
+    que no requieren una tabla hija. El rango MD se guarda para las consultas
+    estructurales.
+    """
+
+    md_min: Decimal | None = None
+    md_max: Decimal | None = None
+    md_uom: str | None = None
+    object_type: str = "mudLog"
+
+
 @dataclass(frozen=True)
 class ChangeLogRecord:
     uid: str
