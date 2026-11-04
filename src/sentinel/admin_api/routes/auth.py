@@ -66,6 +66,7 @@ async def run_setup(
         admin_email=payload.admin_email,
         admin_name=payload.admin_name,
         admin_password=payload.admin_password,
+        cascaded_delete=payload.cascaded_delete,
         correlation_id=correlation,
     )
     result = await services.identities.login(

@@ -23,6 +23,7 @@ from sentinel.admin_api.schemas import (
     AdminUserUpdate,
     AuditEventView,
     AuditPage,
+    CascadedDeleteUpdateRequest,
     ContactUpdateRequest,
     CredentialView,
     GrantIn,
@@ -147,6 +148,27 @@ async def update_contact(
         services,
         auth,
         action="server-config.contact.updated",
+        correlation=correlation_id(request),
+    )
+    return _config_view(config)
+
+
+@router.put("/server-config/cascaded-delete", response_model=ServerConfigView)
+async def update_cascaded_delete(
+    payload: CascadedDeleteUpdateRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_superadmin),
+    _: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ServerConfigView:
+    config = await services.config.update_cascaded_delete(
+        enabled=payload.enabled,
+        actor=auth.principal.name,
+    )
+    await audit(
+        services,
+        auth,
+        action="server-config.cascaded_delete.updated",
         correlation=correlation_id(request),
     )
     return _config_view(config)

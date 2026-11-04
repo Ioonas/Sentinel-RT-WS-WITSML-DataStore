@@ -173,7 +173,8 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     assert cap_server is not None
     assert cap_server.get("apiVers") == "1.4.1"
     assert cap_server.findtext(f"{{{API_NS}}}schemaVersion") == "1.4.1.1"
-    assert cap_server.findtext(f"{{{API_NS}}}cascadedDelete") == "true"
+    # Por defecto el servidor no habilita la cascada (prevención de borrados accidentales).
+    assert cap_server.findtext(f"{{{API_NS}}}cascadedDelete") == "false"
     assert cap_server.findtext(f"{{{API_NS}}}supportUomConversion") == "false"
     # D-01: compressionMethod no se declara; solo describe compresión de
     # solicitudes y las respuestas se comprimen según Accept-Encoding.
@@ -601,6 +602,13 @@ async def test_wmls_cascaded_delete_removes_descendants(
     admin_client: AsyncClient, csrf: str
 ) -> None:
     """Test Plan 22: ``cascadedDelete=true`` elimina los objetos dependientes."""
+    # La cascada está deshabilitada por defecto; el superadministrador la habilita.
+    enabled = await admin_client.put(
+        "/admin-api/v1/server-config/cascaded-delete",
+        json={"enabled": True},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert enabled.status_code == 200, enabled.text
     secret = await create_writer(admin_client, csrf)
     for object_type, xml in (
         ("well", WELL),

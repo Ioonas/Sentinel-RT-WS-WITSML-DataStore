@@ -57,13 +57,29 @@ class ConfigService:
         await self._repo.save(config)
         return config
 
-    async def complete_setup(self, *, email: str, phone: str, actor: str) -> ServerConfig:
+    async def update_cascaded_delete(self, *, enabled: bool, actor: str) -> ServerConfig:
+        config = await self.get()
+        config.cascaded_delete = enabled
+        config.updated_at = self._clock.now()
+        config.updated_by = actor
+        await self._repo.save(config)
+        return config
+
+    async def complete_setup(
+        self,
+        *,
+        email: str,
+        phone: str,
+        actor: str,
+        cascaded_delete: bool = False,
+    ) -> ServerConfig:
         config = await self.get()
         if config.setup_completed:
             raise ConflictError("La configuración inicial ya fue completada.")
         self.validate_contact(email, phone)
         config.contact_email = email.strip()
         config.contact_phone = phone.strip()
+        config.cascaded_delete = cascaded_delete
         config.setup_completed = True
         config.updated_at = self._clock.now()
         config.updated_by = actor
@@ -152,6 +168,7 @@ class SetupService:
         admin_email: str,
         admin_name: str,
         admin_password: str,
+        cascaded_delete: bool = False,
         correlation_id: str,
     ) -> None:
         if await self.status():
@@ -164,7 +181,10 @@ class SetupService:
             password=admin_password,
         )
         await self._config.complete_setup(
-            email=contact_email, phone=contact_phone, actor=user.email
+            email=contact_email,
+            phone=contact_phone,
+            actor=user.email,
+            cascaded_delete=cascaded_delete,
         )
         await self._audit.record(
             actor_id=user.id,

@@ -57,11 +57,16 @@ class SetupRequest(StrictModel):
     admin_email: str = Field(min_length=3, max_length=255)
     admin_name: str = Field(min_length=1, max_length=255)
     admin_password: str = Field(min_length=12, max_length=1024)
+    cascaded_delete: bool = False
 
 
 class ContactUpdateRequest(StrictModel):
     contact_email: str = Field(min_length=3, max_length=255)
     contact_phone: str = Field(min_length=6, max_length=32)
+
+
+class CascadedDeleteUpdateRequest(StrictModel):
+    enabled: bool
 
 
 class ServerConfigView(BaseModel):

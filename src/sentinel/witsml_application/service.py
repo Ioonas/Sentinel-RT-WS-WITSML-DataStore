@@ -1418,12 +1418,15 @@ class WitsmlStoreService:
     ) -> StoreResult:
         started = time.perf_counter()
         options = xd.parse_options(options_xml)
+        config = await self._config.get()
         try:
             result = await self._delete(
                 principal,
                 object_type=object_type,
                 query_xml=query_xml,
-                cascade=options.cascaded_delete,
+                # Sin cascada habilitada en el servidor, cascadedDelete=true se
+                # ignora: los padres con hijos se rechazan con -432.
+                cascade=options.cascaded_delete and config.cascaded_delete,
             )
         except WitsmlError as exc:
             await self._record_audit(

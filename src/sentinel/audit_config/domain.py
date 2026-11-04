@@ -40,7 +40,9 @@ class ServerConfig:
     growing_timeout_seconds: int = 3_600
     change_detection_seconds: int = 60
     max_request_latest_values: int = 500
-    cascaded_delete: bool = True
+    # Por defecto false: evita eliminaciones en cascada accidentales. Solo el
+    # superadministrador lo cambia, en el arranque inicial o después.
+    cascaded_delete: bool = False
     support_uom_conversion: bool = False
     updated_at: datetime | None = None
     updated_by: str | None = None
