@@ -219,10 +219,13 @@ class SqlAlchemyWellRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get(self, uid: str, uid_well: str | None = None) -> WellRecord | None:
-        row = await self._session.scalar(
-            select(WellRow).where(func.lower(WellRow.uid) == uid.lower())
-        )
+    async def get(
+        self, uid: str, uid_well: str | None = None, *, for_update: bool = False
+    ) -> WellRecord | None:
+        stmt = select(WellRow).where(func.lower(WellRow.uid) == uid.lower())
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = await self._session.scalar(stmt)
         return _to_well(row) if row else None
 
     async def list(self, filters: ListFilter) -> list[WellRecord]:
@@ -264,11 +267,13 @@ class SqlAlchemyWellboreRepository:
         self._session = session
 
     async def get(
-        self, uid: str, uid_well: str | None = None
+        self, uid: str, uid_well: str | None = None, *, for_update: bool = False
     ) -> WellboreRecord | None:
         stmt = select(WellboreRow).where(func.lower(WellboreRow.uid) == uid.lower())
         if uid_well:
             stmt = stmt.where(func.lower(WellboreRow.uid_well) == uid_well.lower())
+        if for_update:
+            stmt = stmt.with_for_update()
         row = await self._session.scalar(stmt)
         return _to_wellbore(row) if row else None
 
@@ -319,7 +324,12 @@ class SqlAlchemyLogRepository:
         self._session = session
 
     async def get(
-        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+        self,
+        uid: str,
+        uid_well: str | None = None,
+        uid_wellbore: str | None = None,
+        *,
+        for_update: bool = False,
     ) -> LogRecord | None:
         stmt = (
             select(LogRow)
@@ -330,6 +340,8 @@ class SqlAlchemyLogRepository:
             stmt = stmt.where(func.lower(LogRow.uid_well) == uid_well.lower())
         if uid_wellbore:
             stmt = stmt.where(func.lower(LogRow.uid_wellbore) == uid_wellbore.lower())
+        if for_update:
+            stmt = stmt.with_for_update()
         row = await self._session.scalar(stmt)
         return _to_log(row) if row else None
 
@@ -625,7 +637,12 @@ class SqlAlchemyTrajectoryRepository:
         self._session = session
 
     async def get(
-        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+        self,
+        uid: str,
+        uid_well: str | None = None,
+        uid_wellbore: str | None = None,
+        *,
+        for_update: bool = False,
     ) -> TrajectoryRecord | None:
         stmt = select(TrajectoryRow).where(
             func.lower(TrajectoryRow.uid) == uid.lower()
@@ -636,6 +653,8 @@ class SqlAlchemyTrajectoryRepository:
             stmt = stmt.where(
                 func.lower(TrajectoryRow.uid_wellbore) == uid_wellbore.lower()
             )
+        if for_update:
+            stmt = stmt.with_for_update()
         row = await self._session.scalar(stmt)
         return _to_trajectory(row) if row else None
 
@@ -764,7 +783,12 @@ class SqlAlchemyMudLogRepository:
         self._session = session
 
     async def get(
-        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+        self,
+        uid: str,
+        uid_well: str | None = None,
+        uid_wellbore: str | None = None,
+        *,
+        for_update: bool = False,
     ) -> MudLogRecord | None:
         stmt = select(MudLogRow).where(func.lower(MudLogRow.uid) == uid.lower())
         if uid_well:
@@ -773,6 +797,8 @@ class SqlAlchemyMudLogRepository:
             stmt = stmt.where(
                 func.lower(MudLogRow.uid_wellbore) == uid_wellbore.lower()
             )
+        if for_update:
+            stmt = stmt.with_for_update()
         row = await self._session.scalar(stmt)
         return _to_mudlog(row) if row else None
 

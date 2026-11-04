@@ -1119,6 +1119,16 @@ def contextual_names(
     )
 
 
+def last_change_token(element: etree._Element) -> datetime | None:
+    """Devuelve ``commonData/dTimLastChange`` enviado por el cliente.
+
+    Se usa como precondición de concurrencia optimista: una actualización o un
+    borrado solo se aplican si el token coincide con el ``dTimLastChange``
+    almacenado. Un cliente que no lo envía conserva el último escritor gana.
+    """
+    return _common_datetime(child(element, "commonData"), "dTimLastChange")
+
+
 def strip_server_fields(element: etree._Element) -> None:
     for name in SERVER_MANAGED_ATTRIBUTES:
         element.attrib.pop(name, None)

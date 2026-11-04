@@ -46,7 +46,9 @@ class ListFilter:
 
 
 class WellRepositoryPort(Protocol):
-    async def get(self, uid: str, uid_well: str | None = None) -> WellRecord | None: ...
+    async def get(
+        self, uid: str, uid_well: str | None = None, *, for_update: bool = False
+    ) -> WellRecord | None: ...
 
     async def list(self, filters: ListFilter) -> list[WellRecord]: ...
 
@@ -61,7 +63,7 @@ class WellRepositoryPort(Protocol):
 
 class WellboreRepositoryPort(Protocol):
     async def get(
-        self, uid: str, uid_well: str | None = None
+        self, uid: str, uid_well: str | None = None, *, for_update: bool = False
     ) -> WellboreRecord | None: ...
 
     async def list(self, filters: ListFilter) -> list[WellboreRecord]: ...
@@ -77,7 +79,12 @@ class WellboreRepositoryPort(Protocol):
 
 class LogRepositoryPort(Protocol):
     async def get(
-        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+        self,
+        uid: str,
+        uid_well: str | None = None,
+        uid_wellbore: str | None = None,
+        *,
+        for_update: bool = False,
     ) -> LogRecord | None: ...
 
     async def list(self, filters: ListFilter) -> list[LogRecord]: ...
@@ -139,7 +146,12 @@ class LogRepositoryPort(Protocol):
 
 class MudLogRepositoryPort(Protocol):
     async def get(
-        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+        self,
+        uid: str,
+        uid_well: str | None = None,
+        uid_wellbore: str | None = None,
+        *,
+        for_update: bool = False,
     ) -> MudLogRecord | None: ...
 
     async def list(self, filters: ListFilter) -> list[MudLogRecord]: ...
@@ -155,7 +167,12 @@ class MudLogRepositoryPort(Protocol):
 
 class TrajectoryRepositoryPort(Protocol):
     async def get(
-        self, uid: str, uid_well: str | None = None, uid_wellbore: str | None = None
+        self,
+        uid: str,
+        uid_well: str | None = None,
+        uid_wellbore: str | None = None,
+        *,
+        for_update: bool = False,
     ) -> TrajectoryRecord | None: ...
 
     async def list(self, filters: ListFilter) -> list[TrajectoryRecord]: ...

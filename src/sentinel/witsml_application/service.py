@@ -1110,7 +1110,6 @@ class WitsmlStoreService:
         if not elements:
             raise WitsmlError(WmlsCode.MISSING_UID)
         config = await self._config.get()
-        now = self._clock.now()
         uids: list[str] = []
 
         for element in elements:
@@ -1125,10 +1124,17 @@ class WitsmlStoreService:
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
 
             existing = await self._load_existing(
-                object_type, uid, uid_well, uid_wellbore
+                object_type, uid, uid_well, uid_wellbore, for_update=True
             )
             if existing is None:
                 raise WitsmlError(WmlsCode.OBJECT_NOT_EXIST)
+            self._require_matching_token(
+                xd.last_change_token(element), existing.changed_at
+            )
+            # Se calcula tras adquirir el bloqueo para que el nuevo
+            # ``dTimLastChange`` no retroceda respecto del que acaba de escribir
+            # otra transacción.
+            now = self._clock.now()
 
             merged = xd.merge_header(parse_xml(existing.xml), element)
             xd.strip_server_fields(merged)
@@ -1498,7 +1504,6 @@ class WitsmlStoreService:
         elements = [item for item in root if xd.localname(item) == spec.name]
         if not elements:
             raise WitsmlError(WmlsCode.MISSING_UID)
-        now = self._clock.now()
         deleted = 0
         modified = 0
         for element in elements:
@@ -1514,10 +1519,14 @@ class WitsmlStoreService:
             ):
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
             existing = await self._load_existing(
-                object_type, uid, uid_well, uid_wellbore
+                object_type, uid, uid_well, uid_wellbore, for_update=True
             )
             if existing is None:
                 raise WitsmlError(WmlsCode.OBJECT_NOT_EXIST)
+            self._require_matching_token(
+                xd.last_change_token(element), existing.changed_at, deleting=True
+            )
+            now = self._clock.now()
 
             stored = parse_xml(existing.xml)
             xd.ensure_namespace(stored)
@@ -1657,22 +1666,50 @@ class WitsmlStoreService:
             "trajectory": self._trajectories,
         }[object_type]
 
+    @staticmethod
+    def _require_matching_token(
+        token: datetime | None, stored: datetime, *, deleting: bool = False
+    ) -> None:
+        """Aplica la precondición de concurrencia optimista del cliente.
+
+        El token es opcional para no romper a los clientes WITSML 1.4.1 que no
+        envían ``dTimLastChange``. Cuando llega, debe coincidir exactamente con
+        el valor almacenado; si otra transacción escribió antes, la escritura se
+        rechaza sin persistir ni registrar ``changeLog``.
+        """
+        if token is None or token == stored:
+            return
+        code = WmlsCode.ERROR_DELETING if deleting else WmlsCode.ERROR_UPDATING
+        raise WitsmlError(
+            code,
+            "dTimLastChange no coincide con el objeto almacenado; "
+            "recargue el objeto y reintente.",
+        )
+
     async def _load_existing(
         self,
         object_type: str,
         uid: str,
         uid_well: str | None,
         uid_wellbore: str | None,
+        *,
+        for_update: bool = False,
     ) -> StoredObject | None:
         if object_type == "well":
-            return await self._wells.get(uid)
+            return await self._wells.get(uid, for_update=for_update)
         if object_type == "wellbore":
-            return await self._wellbores.get(uid, uid_well)
+            return await self._wellbores.get(uid, uid_well, for_update=for_update)
         if object_type == "log":
-            return await self._logs.get(uid, uid_well, uid_wellbore)
+            return await self._logs.get(
+                uid, uid_well, uid_wellbore, for_update=for_update
+            )
         if object_type == "mudLog":
-            return await self._mud_logs.get(uid, uid_well, uid_wellbore)
-        return await self._trajectories.get(uid, uid_well, uid_wellbore)
+            return await self._mud_logs.get(
+                uid, uid_well, uid_wellbore, for_update=for_update
+            )
+        return await self._trajectories.get(
+            uid, uid_well, uid_wellbore, for_update=for_update
+        )
 
     async def _update_repository(self, object_type: str, record: StoredObject) -> None:
         if object_type == "well":

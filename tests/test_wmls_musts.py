@@ -28,6 +28,10 @@ Prueba                                        Cobertura
                                               rechazados sin sobrescribir.
 ``test_acceptance_29_*``                      Criterio 29: SOAP y REST sobre
                                               los mismos casos de uso.
+``test_acceptance_18_*``                      Criterio 18: concurrencia
+                                              optimista con ``dTimLastChange``;
+                                              una escritura incompatible no
+                                              sobrescribe ni deja ``changeLog``.
 ===========================================  ==================================
 
 El Test Plan 83 (gzip de respuesta) se cubre en
@@ -43,6 +47,7 @@ Test Plan.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import gzip
 from decimal import Decimal, InvalidOperation
@@ -873,3 +878,133 @@ async def test_mudlog_partial_update_and_delete_record_change_log(
     gone = await read_mudlog(admin_client, secret)
     assert result(gone) == 1
     assert 'uid="mud-a"' not in field(gone, "XMLout")
+
+
+# ----------------------------------------------------------------------
+# Criterio 18 - concurrencia optimista
+# ----------------------------------------------------------------------
+def well_update(uid: str, name: str, token: str | None = None) -> str:
+    common = (
+        f"<commonData><dTimLastChange>{token}</dTimLastChange></commonData>"
+        if token is not None
+        else ""
+    )
+    return (
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+        f'<well uid="{uid}"><name>{name}</name>{common}</well></wells>'
+    )
+
+
+async def read_well(client: AsyncClient, secret: str, uid: str = "w-a"):
+    response = await soap(
+        client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="{uid}"/></wells>',
+            "OptionsIn": "returnElements=all",
+        },
+    )
+    assert result(response) == 1, field(response, "SuppMsgOut")
+    return field(response, "XMLout")
+
+
+def well_last_change(xml_out: str) -> str:
+    root = etree.fromstring(xml_out.encode("utf-8"))
+    element = root.find(f".//{WITSML}dTimLastChange")
+    assert element is not None and element.text
+    return element.text
+
+
+async def update_well(
+    client: AsyncClient, secret: str, xml: str
+):
+    return await soap(
+        client,
+        "WMLS_UpdateInStore",
+        secret,
+        {"WMLtypeIn": "well", "XMLin": xml, "OptionsIn": ""},
+    )
+
+
+def update_entries(change_xml: str) -> int:
+    return change_xml.count("<changeType>update</changeType>")
+
+
+async def read_well_changes(client: AsyncClient, secret: str, uid: str = "w-a"):
+    response = await soap(
+        client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "changeLog",
+            "QueryIn": (
+                f'<changeLogs xmlns="{WITSML_NS}">'
+                f'<changeLog uidObject="{uid}"/></changeLogs>'
+            ),
+            "OptionsIn": "",
+        },
+    )
+    assert result(response) == 1, field(response, "SuppMsgOut")
+    return field(response, "XMLout")
+
+
+async def test_acceptance_18_last_change_token_guards_updates(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    secret = await create_writer(admin_client, csrf)
+    await create_parents(admin_client, secret)
+    token = well_last_change(await read_well(admin_client, secret))
+
+    # Token obsoleto: se rechaza con -1003 y no se persiste ni audita.
+    stale = await update_well(
+        admin_client,
+        secret,
+        well_update("w-a", "Stale Writer", "2000-01-01T00:00:00.000Z"),
+    )
+    assert result(stale) == -1003, field(stale, "SuppMsgOut")
+    unchanged = await read_well(admin_client, secret)
+    assert "<name>Well A</name>" in unchanged
+    assert well_last_change(unchanged) == token
+    assert update_entries(await read_well_changes(admin_client, secret)) == 0
+
+    # El token vigente permite la escritura y renueva dTimLastChange.
+    accepted = await update_well(
+        admin_client, secret, well_update("w-a", "Concurrency Wins", token)
+    )
+    assert result(accepted) == 1, field(accepted, "SuppMsgOut")
+    renamed = await read_well(admin_client, secret)
+    assert "<name>Concurrency Wins</name>" in renamed
+    assert well_last_change(renamed) != token
+    assert update_entries(await read_well_changes(admin_client, secret)) == 1
+
+    # Sin token se conserva el comportamiento clásico (último escritor gana).
+    legacy = await update_well(
+        admin_client, secret, well_update("w-a", "Legacy Writer")
+    )
+    assert result(legacy) == 1, field(legacy, "SuppMsgOut")
+    assert "<name>Legacy Writer</name>" in await read_well(admin_client, secret)
+
+
+async def test_acceptance_18_concurrent_updates_have_single_winner(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    secret = await create_writer(admin_client, csrf)
+    await create_parents(admin_client, secret)
+    token = well_last_change(await read_well(admin_client, secret))
+
+    async def update(name: str):
+        return await update_well(
+            admin_client, secret, well_update("w-a", name, token)
+        )
+
+    first, second = await asyncio.gather(update("Writer A"), update("Writer B"))
+    assert sorted([result(first), result(second)]) == [-1003, 1], (
+        field(first, "SuppMsgOut"),
+        field(second, "SuppMsgOut"),
+    )
+
+    # Solo la transacción ganadora registra su entrada en el changeLog.
+    change_xml = await read_well_changes(admin_client, secret)
+    assert update_entries(change_xml) == 1
