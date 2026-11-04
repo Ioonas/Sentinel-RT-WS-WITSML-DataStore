@@ -244,7 +244,7 @@ semántica. Si en la evaluación formal se exige el valor de 600 s, basta
 actualizar `server_config.change_detection_seconds` (o el valor por defecto de
 `ServerConfig`) y repetir la suite: no hay cambios de código asociados.
 
-### 6.2 Pruebas propias D-15 y criterios 12, 13, 19, 29 y 36
+### 6.2 Pruebas propias D-15 y criterios 12, 13, 18, 19, 29 y 36
 
 Además de la suite oficial, el expediente incluye pruebas automatizadas para los
 MUST que la herramienta no ejecuta. La trazabilidad completa está en
@@ -264,6 +264,7 @@ MUST que la herramienta no ejecuta. La trazabilidad completa está en
 | `-427` y `-428` | `test_wmls_request_object_selection_option_rules` | `requestObjectSelectionCapability` distinto de `none` es el único keyword permitido y exige la Minimum Query Template; `none` restaura el comportamiento normal. |
 | `-443` y `-453` | `test_wmls_uom_dictionary_validation` + `test_uom_dictionary_validation_follows_measure_types` | Medida sin `uom` (`-453`) o con un valor que no es `annotation` del diccionario oficial (`-443`), con resolución del tipo XSD de cada elemento. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y duplicados rechazados con `-463`. |
+| Criterio 18 | `test_acceptance_18_*` (tres pruebas) | Token `dTimLastChange` obsoleto rechazado con `-1003` sin persistir ni dejar `changeLog`; dos escrituras concurrentes con el mismo token tienen un único ganador; un lote con conflicto no persiste ninguno de sus elementos. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4) | Lectura por REST de un alta SOAP y borrado REST visible por SOAP. |
 
 El diccionario de unidades vendorizado
@@ -277,6 +278,21 @@ purga, así que la prueba comprueba que la entrada sigue consultable con el mism
 filtro. El *clearing* por canal se implementó en
 `WitsmlApplicationService._clear_updated_channels` y el transporte SOAP ahora
 devuelve un fault 400 ante un cuerpo ilegible o comprimido.
+
+### 6.3 Concurrencia optimista (criterio 18)
+
+`UpdateInStore` y `DeleteFromStore` admiten `commonData/dTimLastChange` como
+precondición opcional. La fila se bloquea con `SELECT … FOR UPDATE`; si el token
+no coincide con el valor almacenado, la actualización devuelve `-1003` y el
+borrado `-1004`, sin persistir ni registrar `changeLog`. La decisión completa
+está en `docs/adr/0008-concurrencia-optimista.md`.
+
+Los 15 scripts oficiales que actualizan y los 15 que borran no envían
+`dTimLastChange`, de modo que la precondición no altera la suite. Tras el cambio
+se reejecutaron `test22`, `test30`, `test34`, `test61` y `test94a`: todos
+terminaron con `pass=1 fail=0 skip=0` y `!*** SUCCESS`. La verificación
+automatizada propia son las tres pruebas del criterio 18 en
+`tests/test_wmls_musts.py`; `pytest -q` quedó en **53 passed**.
 
 ## 7. Triaje
 

@@ -11,6 +11,9 @@ dominio, autorización, persistencia PostgreSQL y auditoría.
 - Objetos WITSML: `well`, `wellbore`, `log`, `trajectory` y `mudLog`,
   incluidos datos de curva, estaciones de trayectoria, intervalos de geología,
   parámetros de lodo, crecimiento y `changeLog` de solo lectura.
+- Concurrencia optimista opcional en actualización y borrado mediante
+  `commonData/dTimLastChange`: un token obsoleto devuelve `-1003`/`-1004` sin
+  sobrescribir ni registrar `changeLog`.
 - API administrativa `/admin-api/v1`: primer arranque, sesión humana con cookie
   segura y CSRF, invitaciones, recuperación, usuarios, cuentas de servicio,
   credenciales de un solo uso, roles/acceso, inventario, borrado explícito,
@@ -92,6 +95,7 @@ npm run dev
 
 Páginas disponibles: resumen, configuración del servidor, cuentas de servicio,
 usuarios administrativos, roles y acceso, objetos WITSML, auditoría y perfil.
+La especificación funcional y visual de la interfaz está en `docs/ui-spec.md`.
 La UI nunca es una frontera de seguridad: todas las reglas se validan en el
 backend.
 
@@ -118,7 +122,7 @@ frontend/
 ```
 
 Los ADR en `docs/adr/` documentan las decisiones de arquitectura, persistencia,
-SOAP/XSD oficial, identidad y frontend.
+SOAP/XSD oficial, identidad, frontend y concurrencia optimista.
 
 ## Contrato oficial y fase 0
 
@@ -141,6 +145,14 @@ oficial `schemas/witsml/1.4.1.1/witsml_v1.4.1.1_data/ancillary/witsmlUnitDict.xm
 diccionario devuelve `-443` (§6.4.4.2 y §6.7.4.3). El validador sigue los tipos
 XSD, de modo que nombres ambiguos como `customData/extensionNameValue/value` no
 se confunden con medidas. La conversión de unidades sigue fuera de alcance.
+
+`UpdateInStore` y `DeleteFromStore` aceptan `commonData/dTimLastChange` como
+precondición opcional de concurrencia optimista. La fila se bloquea con
+`SELECT … FOR UPDATE`; si el token no coincide con el `dTimLastChange` almacenado,
+la operación devuelve `-1003` (actualización) o `-1004` (borrado) y no persiste
+ni registra `changeLog`. Sin token se mantiene el comportamiento clásico que
+usan los clientes WITSML 1.4.1 y la suite oficial. La decisión está en
+`docs/adr/0008-concurrencia-optimista.md`.
 
 Los MUST del Test Plan que la suite no ejecuta se cubren con pruebas propias y su
 trazabilidad está en `docs/adr/0007-pruebas-propias-d15.md`. La suite oficial

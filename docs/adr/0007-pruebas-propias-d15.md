@@ -31,6 +31,7 @@ identificador del Test Plan o el criterio de aceptación que cubre.
 | `-443` y `-453` | `test_wmls_uom_dictionary_validation` + `test_uom_dictionary_validation_follows_measure_types` | Toda medida declara `uom` (`-453`) y su valor pertenece a los `annotation` del diccionario oficial (`-443`), resolviendo el tipo XSD de cada elemento. |
 | Criterio 12 | `test_d15_82_*` | Actualización parcial preserva curvas omitidas y distingue append de modificación interior. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y nodos con el mismo índice rechazados con `-463` sin sobrescribir. |
+| Criterio 18 | `test_acceptance_18_*` (tres pruebas) | `dTimLastChange` como precondición opcional: token obsoleto devuelve `-1003` sin persistir ni registrar `changeLog`; dos escrituras concurrentes con el mismo token tienen un único ganador; un lote con conflicto no persiste cambios parciales. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4 objetos) | El objeto creado por SOAP se lee por REST y el borrado por REST se refleja en SOAP. |
 | Criterio 36 | Pruebas 74 y 75 | Los límites se provocan por separado (nodos y puntos). |
 
