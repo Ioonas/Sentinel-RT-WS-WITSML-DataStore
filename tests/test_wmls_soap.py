@@ -660,6 +660,101 @@ async def test_add_rejects_nonconforming_xml(
     assert result(response) == -409
 
 
+async def test_wmls_uom_dictionary_validation(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    """§6.4.4.2/§6.7.4.3: ``-453`` sin unidad y ``-443`` fuera del diccionario."""
+    secret = await create_writer(admin_client, csrf)
+
+    for code, fragment in (
+        ("-443", "annotation"),
+        ("-453", "always specify the unit"),
+    ):
+        message = await soap(
+            admin_client, "WMLS_GetBaseMsg", secret, {"ReturnValueIn": code}
+        )
+        assert fragment in field(message, "Result")
+
+    prefix = (
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+        '<well uid="w-uom"><name>UOM Well</name>'
+        "<timeZone>-06:00</timeZone>"
+    )
+    custom_data = (
+        '<customData><extensionNameValue name="note">'
+        "<value>sin uom</value><index>1</index></extensionNameValue></customData>"
+    )
+
+    def add(xml: str):
+        return soap(
+            admin_client,
+            "WMLS_AddToStore",
+            secret,
+            {"WMLtypeIn": "well", "XMLin": xml, "OptionsIn": ""},
+        )
+
+    def update(xml: str):
+        return soap(
+            admin_client,
+            "WMLS_UpdateInStore",
+            secret,
+            {"WMLtypeIn": "well", "XMLin": xml, "OptionsIn": ""},
+        )
+
+    # customData no es una medida: su <value> no exige uom.
+    added = await add(
+        prefix + '<waterDepth uom="m">12</waterDepth>' + custom_data + "</well></wells>"
+    )
+    assert result(added) == 1, field(added, "SuppMsgOut")
+
+    updated = await update(
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well uid="w-uom">'
+        '<waterDepth uom="m">13</waterDepth></well></wells>'
+    )
+    assert result(updated) == 1, field(updated, "SuppMsgOut")
+
+    for xml, code in (
+        (prefix + "<waterDepth>12</waterDepth></well></wells>", -453),
+        (prefix + '<waterDepth uom="">12</waterDepth></well></wells>', -453),
+        (
+            prefix + '<waterDepth uom="furlong">12</waterDepth></well></wells>',
+            -443,
+        ),
+    ):
+        rejected = await add(xml)
+        assert result(rejected) == code, field(rejected, "SuppMsgOut")
+
+    for xml, code in (
+        (
+            f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well uid="w-uom">'
+            "<waterDepth>14</waterDepth></well></wells>",
+            -453,
+        ),
+        (
+            f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well uid="w-uom">'
+            '<waterDepth uom="furlong">14</waterDepth></well></wells>',
+            -443,
+        ),
+    ):
+        rejected = await update(xml)
+        assert result(rejected) == code, field(rejected, "SuppMsgOut")
+
+    # La detección sigue el tipo XSD también en medidas anidadas.
+    nested = (
+        f'<trajectorys xmlns="{WITSML_NS}" version="1.4.1.1">'
+        '<trajectory uid="tr-uom" uidWell="w-1" uidWellbore="wb-1">'
+        "<name>UOM Trajectory</name><trajectoryStation uid=\"s-uom\">"
+        "<md>0</md></trajectoryStation></trajectory></trajectorys>"
+    )
+    rejected = await soap(
+        admin_client,
+        "WMLS_AddToStore",
+        secret,
+        {"WMLtypeIn": "trajectory", "XMLin": nested, "OptionsIn": ""},
+    )
+    assert result(rejected) == -453, field(rejected, "SuppMsgOut")
+
+
 async def test_published_wsdl_is_official(admin_client: AsyncClient) -> None:
     response = await admin_client.get("/witsml")
     assert response.status_code == 200

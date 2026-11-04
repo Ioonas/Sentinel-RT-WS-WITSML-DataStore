@@ -28,6 +28,7 @@ identificador del Test Plan o el criterio de aceptación que cubre.
 | 22 | `test_wmls_cascaded_delete_removes_descendants` | `cascadedDelete=true` elimina `well -> wellbore -> log/trajectory/mudLog` y registra `delete` por objeto. |
 | -432 | `test_wmls_discovery_and_crud` + `test_wmls_cascaded_delete_removes_descendants` | Sin `cascadedDelete=true`, el padre con hijos se rechaza con `-432`. |
 | `-427` y `-428` | `test_wmls_request_object_selection_option_rules` | `requestObjectSelectionCapability` con valor distinto de `none` exige ser el único keyword (`-427`) y una Minimum Query Template (`-428`); `none` restaura el comportamiento normal. |
+| `-443` y `-453` | `test_wmls_uom_dictionary_validation` + `test_uom_dictionary_validation_follows_measure_types` | Toda medida declara `uom` (`-453`) y su valor pertenece a los `annotation` del diccionario oficial (`-443`), resolviendo el tipo XSD de cada elemento. |
 | Criterio 12 | `test_d15_82_*` | Actualización parcial preserva curvas omitidas y distingue append de modificación interior. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y nodos con el mismo índice rechazados con `-463` sin sobrescribir. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4 objetos) | El objeto creado por SOAP se lee por REST y el borrado por REST se refleja en SOAP. |
@@ -67,6 +68,26 @@ keyword de `OptionsIn` (`-427`) y que `QueryIn` sea la Minimum Query Template
 antes de parsear la consulta y devuelve una plantilla con los elementos de
 selección (`uid`, `name`, `numGovt`, `numAPI`, `dTimLastChange`). El valor
 `none` mantiene el comportamiento normal y permite el resto de keywords.
+
+### Diccionario de unidades (§6.4.4.2 y §6.7.4.3)
+
+La API exige que todo dato de medida declare `uom` (`-453`) y que el valor
+coincida con un atributo `annotation` de `witsmlUnitDict.xml` (`-443`). El XSD
+oficial ya marca `uom` como obligatorio, pero su enumeración es por clase de
+cantidad y el error saldría como XML no conforme. `UomValidator` aplica las
+reglas antes del XSD:
+
+- El diccionario oficial se vendoriza en
+  `schemas/witsml/1.4.1.1/witsml_v1.4.1.1_data/ancillary/witsmlUnitDict.xml`
+  (700 052 bytes, SHA-256 `4475747828d983b8cfc5a7a7cf4e47a219bdd2cf49cc8a204cd1ba487f08bbaa`)
+  y se carga de forma perezosa una sola vez.
+- El índice de tipos se construye desde los XSD de la variante de escritura y
+  sigue la declaración de cada elemento; así un mismo nombre de elemento solo se
+  trata como medida cuando su tipo XSD lo es. Las ramas no resolubles
+  (`customData` usa `xsd:any`) validan el `uom` presente pero no exigen uno.
+- Un `uom` vacío o ausente en una medida devuelve `-453`; un valor fuera del
+  diccionario devuelve `-443`. La validación se ejecuta en `AddToStore` y
+  `UpdateInStore`, antes del XSD.
 
 ### Transporte SOAP
 

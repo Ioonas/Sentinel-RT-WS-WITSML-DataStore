@@ -183,6 +183,10 @@ BASE_MESSAGES: dict[int, str] = {
     WmlsCode.EMPTY_UOM: (
         "For WMLS_DeleteFromStore, an empty uom attribute must not be specified."
     ),
+    WmlsCode.INVALID_UOM: (
+        "The value of the uom attribute is must match an 'annotation' attribute "
+        "from the WITSML Units Dictionary XML file."
+    ),
     WmlsCode.INVALID_RETURN_VALUE: (
         "For WMLS_GetBaseMsg, a non-empty value must be specified for ReturnValueIn."
     ),
@@ -218,6 +222,10 @@ BASE_MESSAGES: dict[int, str] = {
     WmlsCode.MAX_DATA_EXCEEDED: (
         "The client must not attempt to add or update more data than is allowed by the "
         "server's maxDataNodes and maxDataPoints values."
+    ),
+    WmlsCode.MISSING_UNIT_FOR_MEASURE: (
+        "For WMLS_AddToStore and WMLS_UpdateInStore, the client must always specify "
+        "the unit for all measure data."
     ),
     WmlsCode.API_VERSION_NOT_SUPPORTED: (
         "The server does not support the API Version provided by the client."

@@ -8,6 +8,8 @@ import pytest
 
 from sentinel.audit_config.domain import ServerConfig
 from sentinel.shared.errors import ValidationError
+from sentinel.witsml_application.domain.errors import WitsmlError
+from sentinel.witsml_application.domain.uom import UomValidator
 from sentinel.xml_schema import documents as xd
 from sentinel.xml_schema.namespaces import WITSML_NS
 from sentinel.xml_schema.parser import parse_xml, serialize
@@ -41,6 +43,36 @@ def test_roundtrip_preserves_namespace() -> None:
     xml = serialize(root)
     assert WITSML_NS in xml
     assert 'uid="w-1"' in xml
+
+
+def test_uom_dictionary_validation_follows_measure_types() -> None:
+    validator = UomValidator()
+    assert validator.available
+
+    prefix = (
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well uid="w-uom">'
+        "<name>UOM Well</name>"
+    )
+    validator.validate(parse_xml(prefix + '<waterDepth uom="m">1</waterDepth></well></wells>'))
+
+    with pytest.raises(WitsmlError) as missing:
+        validator.validate(parse_xml(prefix + "<waterDepth>1</waterDepth></well></wells>"))
+    assert missing.value.wmls_code == -453
+
+    with pytest.raises(WitsmlError) as invalid:
+        validator.validate(
+            parse_xml(prefix + '<waterDepth uom="furlong">1</waterDepth></well></wells>')
+        )
+    assert invalid.value.wmls_code == -443
+
+    # customData usa xsd:any: su <value> no es una medida y no exige uom.
+    validator.validate(
+        parse_xml(
+            prefix
+            + '<customData><extensionNameValue name="note">'
+            "<value>sin uom</value></extensionNameValue></customData></well></wells>"
+        )
+    )
 
 
 def test_parse_options_and_queries() -> None:

@@ -33,6 +33,7 @@ from sentinel.witsml_application.domain.models import (
     WellboreRecord,
     WellRecord,
 )
+from sentinel.witsml_application.domain.uom import UomValidator
 from sentinel.witsml_application.ports import (
     ChangeLogRepositoryPort,
     ListFilter,
@@ -74,6 +75,7 @@ class WitsmlStoreService:
         clock: Clock,
         ids: IdGenerator,
         validator: SchemaValidatorPort,
+        uom: UomValidator | None = None,
     ) -> None:
         self._wells = wells
         self._wellbores = wellbores
@@ -86,6 +88,7 @@ class WitsmlStoreService:
         self._clock = clock
         self._ids = ids
         self._validator = validator
+        self._uom = uom or UomValidator()
 
     # ------------------------------------------------------------------
     # Descubrimiento
@@ -871,6 +874,7 @@ class WitsmlStoreService:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
         root = parse_xml(xml_in)
         xd.ensure_namespace(root)
+        self._uom.validate(root)
         self._validator.validate_document(object_type, root, operation="write")
         spec = spec_for(object_type)
         elements = [item for item in root if xd.localname(item) == spec.name]
@@ -1099,6 +1103,7 @@ class WitsmlStoreService:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
         root = parse_xml(xml_in)
         xd.ensure_namespace(root)
+        self._uom.validate(root)
         self._validator.validate_document(object_type, root, operation="update")
         spec = spec_for(object_type)
         elements = [item for item in root if xd.localname(item) == spec.name]

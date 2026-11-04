@@ -26,6 +26,7 @@ from sentinel.persistence.database import create_engine, create_session_factory
 from sentinel.persistence.repositories import SqlAlchemyRepositories
 from sentinel.shared.clock import Clock, SystemClock
 from sentinel.shared.ids import IdGenerator, UuidGenerator
+from sentinel.witsml_application.domain.uom import UomValidator
 from sentinel.witsml_application.inventory import InventoryService
 from sentinel.witsml_application.service import WitsmlStoreService
 from sentinel.xml_schema.xsd import LxmlXsdValidator, PermissiveSchemaValidator
@@ -64,6 +65,7 @@ class Container:
         self.validator = (
             LxmlXsdValidator(schema_dir) if schema_dir else PermissiveSchemaValidator()
         )
+        self.uom = UomValidator(schema_dir)
         self.hasher = Argon2PasswordHasher()
         self.token_hasher = Sha256TokenHasher()
 
@@ -92,6 +94,7 @@ class Container:
                 clock=self.clock,
                 ids=self.ids,
                 validator=self.validator,
+                uom=self.uom,
             )
             inventory = InventoryService(
                 wells=repos.wells,

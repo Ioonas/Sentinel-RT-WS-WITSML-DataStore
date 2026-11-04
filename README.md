@@ -19,7 +19,8 @@ dominio, autorización, persistencia PostgreSQL y auditoría.
   SQLAlchemy ni SMTP.
 
 Quedan fuera del MVP: conversión UOM, suscripciones push, ETP, paginación
-propietaria y edición manual de XML.
+propietaria y edición manual de XML. La validación de `uom` contra el
+diccionario oficial sí está incluida.
 
 ## Requisitos
 
@@ -133,6 +134,13 @@ usa `ReturnValueIn` (con `ErrorCodeIn` como compatibilidad).
 `requestObjectSelectionCapability` aplica las reglas `-427`/`-428` de §6.6.2.1:
 opción exclusiva y Minimum Query Template. Los detalles y las
 decisiones pendientes están en `docs/adr/0006-contrato-soap-xsd-oficial.md`.
+
+Los atributos `uom` de alta y actualización se validan contra el diccionario
+oficial `schemas/witsml/1.4.1.1/witsml_v1.4.1.1_data/ancillary/witsmlUnitDict.xml`
+(1 290 anotaciones): una medida sin unidad devuelve `-453` y una unidad fuera del
+diccionario devuelve `-443` (§6.4.4.2 y §6.7.4.3). El validador sigue los tipos
+XSD, de modo que nombres ambiguos como `customData/extensionNameValue/value` no
+se confunden con medidas. La conversión de unidades sigue fuera de alcance.
 
 Los MUST del Test Plan que la suite no ejecuta se cubren con pruebas propias y su
 trazabilidad está en `docs/adr/0007-pruebas-propias-d15.md`. La suite oficial

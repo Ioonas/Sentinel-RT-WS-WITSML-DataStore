@@ -262,8 +262,15 @@ MUST que la herramienta no ejecuta. La trazabilidad completa está en
 | 22 | Prueba oficial `test22` + `test_wmls_cascaded_delete_removes_descendants` | `cascadedDelete=true` elimina `well -> wellbore -> log/trajectory/mudLog` y registra un `delete` por objeto. |
 | `-432` | `test_wmls_discovery_and_crud` + `test_wmls_cascaded_delete_removes_descendants` | Sin `cascadedDelete=true`, el padre con hijos se rechaza con `-432`. |
 | `-427` y `-428` | `test_wmls_request_object_selection_option_rules` | `requestObjectSelectionCapability` distinto de `none` es el único keyword permitido y exige la Minimum Query Template; `none` restaura el comportamiento normal. |
+| `-443` y `-453` | `test_wmls_uom_dictionary_validation` + `test_uom_dictionary_validation_follows_measure_types` | Medida sin `uom` (`-453`) o con un valor que no es `annotation` del diccionario oficial (`-443`), con resolución del tipo XSD de cada elemento. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y duplicados rechazados con `-463`. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4) | Lectura por REST de un alta SOAP y borrado REST visible por SOAP. |
+
+El diccionario de unidades vendorizado
+(`schemas/witsml/1.4.1.1/witsml_v1.4.1.1_data/ancillary/witsmlUnitDict.xml`,
+700 052 bytes) tiene SHA-256
+`4475747828d983b8cfc5a7a7cf4e47a219bdd2cf49cc8a204cd1ba487f08bbaa`, idéntico al
+archivo distribuido por Energistics.
 
 La retención de 24 h de las pruebas 12 y 13 no se espera: D-10 fija 5 años sin
 purga, así que la prueba comprueba que la entrada sigue consultable con el mismo
