@@ -883,15 +883,19 @@ async def test_mudlog_partial_update_and_delete_record_change_log(
 # ----------------------------------------------------------------------
 # Criterio 18 - concurrencia optimista
 # ----------------------------------------------------------------------
-def well_update(uid: str, name: str, token: str | None = None) -> str:
+def well_element(uid: str, name: str, token: str | None = None) -> str:
     common = (
         f"<commonData><dTimLastChange>{token}</dTimLastChange></commonData>"
         if token is not None
         else ""
     )
+    return f'<well uid="{uid}"><name>{name}</name>{common}</well>'
+
+
+def well_update(uid: str, name: str, token: str | None = None) -> str:
     return (
         f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
-        f'<well uid="{uid}"><name>{name}</name>{common}</well></wells>'
+        f"{well_element(uid, name, token)}</wells>"
     )
 
 
@@ -1008,3 +1012,38 @@ async def test_acceptance_18_concurrent_updates_have_single_winner(
     # Solo la transacción ganadora registra su entrada en el changeLog.
     change_xml = await read_well_changes(admin_client, secret)
     assert update_entries(change_xml) == 1
+
+
+async def test_acceptance_18_batch_conflict_persists_nothing(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    secret = await create_writer(admin_client, csrf)
+    await create_parents(admin_client, secret)
+    await add(
+        admin_client,
+        secret,
+        "well",
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+        '<well uid="w-b"><name>Well B</name></well></wells>',
+    )
+    token_a = well_last_change(await read_well(admin_client, secret, "w-a"))
+    token_b = well_last_change(await read_well(admin_client, secret, "w-b"))
+
+    # Primer elemento con token válido, segundo con token obsoleto: el lote
+    # completo se rechaza antes de persistir el primer cambio.
+    batch = await update_well(
+        admin_client,
+        secret,
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+        f'{well_element("w-a", "Batch A", token_a)}'
+        f'{well_element("w-b", "Batch B", "2000-01-01T00:00:00.000Z")}'
+        "</wells>",
+    )
+    assert result(batch) == -1003, field(batch, "SuppMsgOut")
+
+    unchanged_a = await read_well(admin_client, secret, "w-a")
+    assert "<name>Well A</name>" in unchanged_a
+    assert well_last_change(unchanged_a) == token_a
+    unchanged_b = await read_well(admin_client, secret, "w-b")
+    assert "<name>Well B</name>" in unchanged_b
+    assert well_last_change(unchanged_b) == token_b

@@ -1110,8 +1110,13 @@ class WitsmlStoreService:
         if not elements:
             raise WitsmlError(WmlsCode.MISSING_UID)
         config = await self._config.get()
-        uids: list[str] = []
+        prepared: list[
+            tuple[etree._Element, str, str | None, str | None, StoredObject]
+        ] = []
 
+        # Primera pasada: permisos, existencia, bloqueo y token de todas las
+        # entradas antes de persistir nada. Así un conflicto de concurrencia en
+        # un lote no deja escrituras parciales de los elementos anteriores.
         for element in elements:
             uid = xd.normalize_uid(xd.attr(element, "uid"))
             if not uid:
@@ -1131,6 +1136,10 @@ class WitsmlStoreService:
             self._require_matching_token(
                 xd.last_change_token(element), existing.changed_at
             )
+            prepared.append((element, uid, uid_well, uid_wellbore, existing))
+
+        uids: list[str] = []
+        for element, uid, uid_well, uid_wellbore, existing in prepared:
             # Se calcula tras adquirir el bloqueo para que el nuevo
             # ``dTimLastChange`` no retroceda respecto del que acaba de escribir
             # otra transacción.
@@ -1504,8 +1513,11 @@ class WitsmlStoreService:
         elements = [item for item in root if xd.localname(item) == spec.name]
         if not elements:
             raise WitsmlError(WmlsCode.MISSING_UID)
-        deleted = 0
-        modified = 0
+        prepared_delete: list[
+            tuple[etree._Element, str, str | None, str | None, StoredObject]
+        ] = []
+        # Primera pasada: permisos, existencia, bloqueo y token antes de borrar
+        # o modificar nada; un conflicto en un lote no deja cambios parciales.
         for element in elements:
             uid = xd.normalize_uid(xd.attr(element, "uid"))
             if not uid:
@@ -1526,6 +1538,11 @@ class WitsmlStoreService:
             self._require_matching_token(
                 xd.last_change_token(element), existing.changed_at, deleting=True
             )
+            prepared_delete.append((element, uid, uid_well, uid_wellbore, existing))
+
+        deleted = 0
+        modified = 0
+        for element, uid, uid_well, uid_wellbore, existing in prepared_delete:
             now = self._clock.now()
 
             stored = parse_xml(existing.xml)
