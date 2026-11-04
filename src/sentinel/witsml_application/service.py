@@ -159,6 +159,9 @@ class WitsmlStoreService:
     ) -> StoreResult:
         spec_for(object_type)
         options = xd.parse_options(options_xml)
+        if options.request_object_selection:
+            self._validate_selection_request(object_type, query_xml, options_xml)
+            return await self._selection_capability(principal, object_type)
         mode = options.return_elements
         if mode not in (
             "all",
@@ -186,25 +189,6 @@ class WitsmlStoreService:
         partial = False
         budget = config.max_data_nodes
         readable_wells = principal.readable_wells
-
-        if options.request_object_selection:
-            records = await self._repository(object_type).list(
-                ListFilter(allowed_wells=readable_wells, limit=1)
-            )
-            for record in records[:1]:
-                element = parse_xml(record.xml)
-                xd.ensure_namespace(element)
-                xd.apply_server_fields(
-                    element,
-                    created_at=record.created_at,
-                    changed_at=record.changed_at,
-                    growing=record.growing_until is not None
-                    and record.growing_until > self._clock.now(),
-                )
-                container.append(xd.apply_selection_capability(element))
-            return StoreResult(
-                code=int(WmlsCode.SUCCESS), xml_out=serialize(container)
-            )
 
         for query in queries:
             if not principal.allows_witsml(WitsmlAction.READ, object_type, query.uid_well):
@@ -256,6 +240,52 @@ class WitsmlStoreService:
             else None
         )
         return StoreResult(code=code, xml_out=serialize(container), supp_msg=supp)
+
+    def _validate_selection_request(
+        self, object_type: str, query_xml: str, options_xml: str | None
+    ) -> None:
+        """Aplica las reglas ``-427``/``-428`` de la API 1.4.1 §6.6.2.1.
+
+        ``requestObjectSelectionCapability`` con un valor distinto de ``none``
+        no admite ningún otro keyword de ``OptionsIn`` y exige que ``QueryIn``
+        sea la Minimum Query Template.
+        """
+        others = [
+            name
+            for name in xd.option_names(options_xml)
+            if name != "requestObjectSelectionCapability"
+        ]
+        if others:
+            raise WitsmlError(
+                WmlsCode.INVALID_OPTIONS_COMBINATION,
+                "requestObjectSelectionCapability no admite otras opciones: "
+                + ", ".join(sorted(others)),
+            )
+        if not xd.is_minimum_query(query_xml, object_type):
+            raise WitsmlError(WmlsCode.INVALID_MINIMUM_QUERY)
+
+    async def _selection_capability(
+        self, principal: Principal, object_type: str
+    ) -> StoreResult:
+        """Plantilla de selección con valores no significativos (§6.6.2.1)."""
+        container = xd.new_container(object_type)
+        records = await self._repository(object_type).list(
+            ListFilter(allowed_wells=principal.readable_wells, limit=1)
+        )
+        for record in records[:1]:
+            element = parse_xml(record.xml)
+            xd.ensure_namespace(element)
+            xd.apply_server_fields(
+                element,
+                created_at=record.created_at,
+                changed_at=record.changed_at,
+                growing=record.growing_until is not None
+                and record.growing_until > self._clock.now(),
+            )
+            container.append(xd.apply_selection_capability(element))
+        return StoreResult(
+            code=int(WmlsCode.SUCCESS), xml_out=serialize(container)
+        )
 
     async def _render_object(
         self,

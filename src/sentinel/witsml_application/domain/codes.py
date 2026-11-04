@@ -193,6 +193,15 @@ BASE_MESSAGES: dict[int, str] = {
     WmlsCode.MISSING_DATA_VERSION: (
         "For WMLS_GetCap, the OptionsIn keyword 'dataVersion' must be specified."
     ),
+    WmlsCode.INVALID_OPTIONS_COMBINATION: (
+        "The OptionsIn keyword 'requestObjectSelectionCapability' with a value "
+        "other than 'none' must not be specified with any other OptionsIn keyword."
+    ),
+    WmlsCode.INVALID_MINIMUM_QUERY: (
+        "If the OptionsIn keyword 'requestObjectSelectionCapability' is specified "
+        "with a value other than 'none' then QueryIn must be the Minimum Query "
+        "Template."
+    ),
     WmlsCode.NOT_BOTTOM_LEVEL: (
         "If cascading deletes are not invoked, a client must only request deletion of "
         "bottom level data-objects such that all child data-objects are deleted before "

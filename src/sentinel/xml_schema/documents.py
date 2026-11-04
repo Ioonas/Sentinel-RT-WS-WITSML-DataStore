@@ -572,6 +572,28 @@ def option_value(options: str | None, name: str) -> str | None:
     return value or None
 
 
+def option_names(options: str | None) -> tuple[str, ...]:
+    """Devuelve los keywords presentes en ``OptionsIn``.
+
+    Se usa para validar combinaciones de opciones (por ejemplo, que
+    ``requestObjectSelectionCapability`` no conviva con otro keyword). Acepta
+    el formato URL-encoded oficial y el formato XML de clientes antiguos.
+    """
+    if not options or not options.strip():
+        return ()
+    text = options.strip()
+    if text.startswith("<"):
+        from sentinel.xml_schema.parser import parse_xml
+
+        try:
+            root = parse_xml(text)
+        except ValidationError:
+            return ()
+        return tuple(localname(item) for item in root)
+    values = parse_qs(text.replace(";", "&"), keep_blank_values=True)
+    return tuple(values)
+
+
 def parse_options(options_xml: str | None) -> QueryOptions:
     return_elements = (
         option_value(options_xml, "returnElements") or "requested"
@@ -584,9 +606,8 @@ def parse_options(options_xml: str | None) -> QueryOptions:
         return_elements=return_elements,
         request_latest_values=int(latest) if latest and latest.isdigit() else None,
         max_return_nodes=int(max_nodes) if max_nodes and max_nodes.isdigit() else None,
-        request_object_selection=str(selection).strip().lower() == "true"
-        if selection is not None
-        else False,
+        request_object_selection=selection is not None
+        and selection.strip().lower() != "none",
         cascaded_delete=str(cascaded).strip().lower() == "true"
         if cascaded is not None
         else False,
@@ -594,6 +615,42 @@ def parse_options(options_xml: str | None) -> QueryOptions:
 
 
 _TRAJECTORY_PLURALS = frozenset({"trajectorys", "trajectories"})
+
+#: Atributos de la raíz que identifican un objeto concreto en una consulta.
+_QUERY_SCOPE_ATTRIBUTES = ("uidWell", "uidWellbore", "uid")
+
+
+def is_minimum_query(query_xml: str, object_type: str) -> bool:
+    """Comprueba que ``QueryIn`` sea la Minimum Query Template.
+
+    La API 1.4.1 §6.6.2.1 exige, cuando
+    ``requestObjectSelectionCapability`` tiene un valor distinto de ``none``,
+    una plantilla mínima: la raíz plural y, como mucho, un elemento vacío del
+    objeto (por ejemplo ``<wells><well/></wells>``).
+    """
+    if not query_xml or not query_xml.strip():
+        return False
+    from sentinel.xml_schema.parser import parse_xml
+
+    try:
+        root = parse_xml(query_xml)
+    except ValidationError:
+        return False
+    ensure_namespace(root)
+    spec = spec_for(object_type)
+    accepted_plurals = (
+        _TRAJECTORY_PLURALS
+        if object_type == "trajectory"
+        else frozenset({spec.plural})
+    )
+    if localname(root) not in accepted_plurals:
+        return False
+    if any(attr(root, name) for name in _QUERY_SCOPE_ATTRIBUTES):
+        return False
+    items = [item for item in root if localname(item) == spec.name]
+    if len(items) != len(root) or len(items) > 1:
+        return False
+    return all(len(item) == 0 and not item.attrib for item in items)
 
 
 def parse_queries(

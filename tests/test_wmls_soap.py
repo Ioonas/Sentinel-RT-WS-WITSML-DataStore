@@ -379,6 +379,117 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
     assert 'uidObject="w-1"' in xml_out
 
 
+async def test_wmls_request_object_selection_option_rules(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    """API 1.4.1 §6.6.2.1: ``-427``/``-428`` de la plantilla de selección."""
+    secret = await create_writer(admin_client, csrf)
+    added = await soap(
+        admin_client,
+        "WMLS_AddToStore",
+        secret,
+        {"WMLtypeIn": "well", "XMLin": WELL, "OptionsIn": ""},
+    )
+    assert result(added) == 1, field(added, "SuppMsgOut")
+
+    minimum = f'<wells xmlns="{WITSML_NS}" version="1.4.1.1"><well/></wells>'
+    selected = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": minimum,
+            "OptionsIn": "requestObjectSelectionCapability=true",
+        },
+    )
+    assert result(selected) == 1, field(selected, "SuppMsgOut")
+    selected_xml = field(selected, "XMLout")
+    assert object_count(selected_xml, "well") == 1
+    for fragment in (
+        'uid="w-1"',
+        "<name>Well One</name>",
+        "<numGovt>GOV-1</numGovt>",
+        "<numAPI>API-1</numAPI>",
+        "<dTimLastChange>",
+    ):
+        assert fragment in selected_xml, fragment
+    # Sólo se devuelven los elementos de selección.
+    assert "<timeZone>" not in selected_xml
+
+    # La cadena vacía se rechaza antes, en el transporte (-408).
+    empty_query = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": "",
+            "OptionsIn": "requestObjectSelectionCapability=true",
+        },
+    )
+    assert result(empty_query) == -408
+
+    # -427: la opción no se combina con ningún otro keyword de OptionsIn.
+    for options in (
+        "requestObjectSelectionCapability=true&returnElements=id-only",
+        "returnElements=id-only&requestObjectSelectionCapability=true",
+    ):
+        rejected = await soap(
+            admin_client,
+            "WMLS_GetFromStore",
+            secret,
+            {
+                "WMLtypeIn": "well",
+                "QueryIn": minimum,
+                "OptionsIn": options,
+            },
+        )
+        assert result(rejected) == -427, options
+
+    # -428: QueryIn debe ser la plantilla mínima.
+    for query in (
+        f'<wells xmlns="{WITSML_NS}"><well uid="w-1"/></wells>',
+        f'<wells xmlns="{WITSML_NS}"><well><name>Well One</name></well></wells>',
+        f'<wells xmlns="{WITSML_NS}"><well/><well/></wells>',
+        f'<wells xmlns="{WITSML_NS}"><wellbore/></wells>',
+    ):
+        rejected = await soap(
+            admin_client,
+            "WMLS_GetFromStore",
+            secret,
+            {
+                "WMLtypeIn": "well",
+                "QueryIn": query,
+                "OptionsIn": "requestObjectSelectionCapability=true",
+            },
+        )
+        assert result(rejected) == -428, query
+
+    # 'none' desactiva la opción: comportamiento normal y otros keywords válidos.
+    normal = await soap(
+        admin_client,
+        "WMLS_GetFromStore",
+        secret,
+        {
+            "WMLtypeIn": "well",
+            "QueryIn": f'<wells xmlns="{WITSML_NS}"><well uid="w-1"/></wells>',
+            "OptionsIn": "requestObjectSelectionCapability=none&returnElements=id-only",
+        },
+    )
+    assert result(normal) == 1, field(normal, "SuppMsgOut")
+
+    base_messages = {
+        -427: "must not be specified with any other OptionsIn keyword",
+        -428: "must be the Minimum Query Template",
+    }
+    for code, fragment in base_messages.items():
+        message = await soap(
+            admin_client, "WMLS_GetBaseMsg", secret, {"ReturnValueIn": str(code)}
+        )
+        assert fragment in field(message, "Result"), code
+
+
 async def test_update_log_accepts_official_index_type_alias(
     admin_client: AsyncClient, csrf: str
 ) -> None:

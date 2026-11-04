@@ -129,7 +129,9 @@ le corresponde; las respuestas de lectura se validan contra `xsd_schemas`.
 
 Los namespaces oficiales son `/wsdl/120`, `/message/120` y
 `/action/120/Store.<operación>`; `OptionsIn` se acepta URL-encoded y `GetBaseMsg`
-usa `ReturnValueIn` (con `ErrorCodeIn` como compatibilidad). Los detalles y las
+usa `ReturnValueIn` (con `ErrorCodeIn` como compatibilidad).
+`requestObjectSelectionCapability` aplica las reglas `-427`/`-428` de §6.6.2.1:
+opción exclusiva y Minimum Query Template. Los detalles y las
 decisiones pendientes están en `docs/adr/0006-contrato-soap-xsd-oficial.md`.
 
 Los MUST del Test Plan que la suite no ejecuta se cubren con pruebas propias y su

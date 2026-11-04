@@ -27,6 +27,7 @@ identificador del Test Plan o el criterio de aceptación que cubre.
 | 6 y 7 | Pruebas existentes de `GetCap` e `id-only` | Capacidades publicadas y consultas de solo identificación. |
 | 22 | `test_wmls_cascaded_delete_removes_descendants` | `cascadedDelete=true` elimina `well -> wellbore -> log/trajectory/mudLog` y registra `delete` por objeto. |
 | -432 | `test_wmls_discovery_and_crud` + `test_wmls_cascaded_delete_removes_descendants` | Sin `cascadedDelete=true`, el padre con hijos se rechaza con `-432`. |
+| `-427` y `-428` | `test_wmls_request_object_selection_option_rules` | `requestObjectSelectionCapability` con valor distinto de `none` exige ser el único keyword (`-427`) y una Minimum Query Template (`-428`); `none` restaura el comportamiento normal. |
 | Criterio 12 | `test_d15_82_*` | Actualización parcial preserva curvas omitidas y distingue append de modificación interior. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y nodos con el mismo índice rechazados con `-463` sin sobrescribir. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4 objetos) | El objeto creado por SOAP se lee por REST y el borrado por REST se refleja en SOAP. |
@@ -56,6 +57,16 @@ hacía y se corrigió en `WitsmlApplicationService._clear_updated_channels`:
   interior deja en nulo el índice no informado.
 - Se sigue registrando una entrada `update` en el `changeLog`, como espera el
   revisor del Test Plan 82 aunque la prueba figure como *Rejected*.
+
+### Plantilla de selección (prueba 15)
+
+La API 1.4.1 §6.6.2.1 exige que, cuando
+`requestObjectSelectionCapability` vale algo distinto de `none`, sea el único
+keyword de `OptionsIn` (`-427`) y que `QueryIn` sea la Minimum Query Template
+(`-428`), por ejemplo `<wells><well/></wells>`. El servicio valida ambas reglas
+antes de parsear la consulta y devuelve una plantilla con los elementos de
+selección (`uid`, `name`, `numGovt`, `numAPI`, `dTimLastChange`). El valor
+`none` mantiene el comportamiento normal y permite el resto de keywords.
 
 ### Transporte SOAP
 

@@ -261,6 +261,7 @@ MUST que la herramienta no ejecuta. La trazabilidad completa está en
 | 6, 7 y 19 | Pruebas existentes de `GetCap` e `id-only` | Capacidades publicadas y consultas de identificación. |
 | 22 | Prueba oficial `test22` + `test_wmls_cascaded_delete_removes_descendants` | `cascadedDelete=true` elimina `well -> wellbore -> log/trajectory/mudLog` y registra un `delete` por objeto. |
 | `-432` | `test_wmls_discovery_and_crud` + `test_wmls_cascaded_delete_removes_descendants` | Sin `cascadedDelete=true`, el padre con hijos se rechaza con `-432`. |
+| `-427` y `-428` | `test_wmls_request_object_selection_option_rules` | `requestObjectSelectionCapability` distinto de `none` es el único keyword permitido y exige la Minimum Query Template; `none` restaura el comportamiento normal. |
 | Criterio 13 | `test_acceptance_13_index_type_and_duplicate_nodes` | Tipo de índice preservado y duplicados rechazados con `-463`. |
 | Criterio 29 | `test_acceptance_29_soap_and_rest_share_use_cases` (×4) | Lectura por REST de un alta SOAP y borrado REST visible por SOAP. |
 
