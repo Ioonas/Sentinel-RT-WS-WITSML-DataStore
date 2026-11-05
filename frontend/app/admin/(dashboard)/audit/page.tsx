@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import {
   Alert,
   Button,
@@ -54,6 +54,7 @@ export default function AuditPage() {
   const [path, setPath] = useState<string | null>(null);
 
   const events = useApiQuery<AuditPage>(path);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   function buildPath(nextCursor: number | null): string {
     const params = new URLSearchParams({ limit: "50" });
@@ -198,13 +199,19 @@ export default function AuditPage() {
                     <th>Objeto</th>
                     <th>Resultado</th>
                     <th>Correlation</th>
-                    <th>Detalle</th>
+                    <th>
+                      <span className={styles.faint}>Detalle</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {events.data && events.data.items.length > 0 ? (
-                    events.data.items.map((event) => (
-                      <tr key={event.id}>
+                    events.data.items.map((event) => {
+                      const expanded = expandedId === event.id;
+                      const entries = Object.entries(event.details ?? {});
+                      return (
+                      <Fragment key={event.id}>
+                      <tr>
                         <td className={styles.numeric}>{formatDateTime(event.occurred_at)}</td>
                         <td className={styles.wrap}>{event.actor_name}</td>
                         <td>{event.channel}</td>
@@ -221,13 +228,44 @@ export default function AuditPage() {
                           <code>{event.correlation_id}</code>
                         </td>
                         <td>
-                          <details>
-                            <summary>Ver</summary>
-                            <pre className={styles.pre}>{JSON.stringify(event.details, null, 2)}</pre>
-                          </details>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-expanded={expanded}
+                            aria-controls={`audit-details-${event.id}`}
+                            onClick={() => setExpandedId(expanded ? null : event.id)}
+                          >
+                            {expanded ? "Ocultar" : "Ver"}
+                          </Button>
                         </td>
                       </tr>
-                    ))
+                      {expanded ? (
+                        <tr id={`audit-details-${event.id}`}>
+                          <td colSpan={8}>
+                            {entries.length > 0 ? (
+                              <dl className={styles.detailsGrid}>
+                                {entries.map(([key, value]) => (
+                                  <Fragment key={key}>
+                                    <dt>{key}</dt>
+                                    <dd>
+                                      {typeof value === "object" && value !== null ? (
+                                        <pre className={styles.pre}>{JSON.stringify(value, null, 2)}</pre>
+                                      ) : (
+                                        String(value)
+                                      )}
+                                    </dd>
+                                  </Fragment>
+                                ))}
+                              </dl>
+                            ) : (
+                              <span className={styles.faint}>Sin detalles registrados.</span>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
+                      );
+                    })
                   ) : (
                     <EmptyRow colSpan={8}>
                       {path ? "Sin eventos para los filtros indicados." : "Ejecute una búsqueda para consultar la auditoría."}
