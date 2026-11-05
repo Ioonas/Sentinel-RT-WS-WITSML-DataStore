@@ -237,3 +237,81 @@ describe("criterio 32: contraste WCAG AA en las vistas principales", () => {
     await context.close();
   });
 });
+
+describe("criterio 5: teclado, foco visible y diálogos (ui-spec §9)", () => {
+  // Devuelve true si el elemento enfocado muestra un indicador visible de foco.
+  const FOCUS_VISIBLE = () => {
+    const el = document.activeElement;
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    const outline = s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0;
+    const shadow = s.boxShadow && s.boxShadow !== "none";
+    return outline || shadow;
+  };
+
+  test("el login se recorre con Tab y cada control enfocado muestra su foco", async () => {
+    const context = await browser.newContext({ baseURL: BASE });
+    const page = await context.newPage();
+    await page.goto("/admin/login");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#email").waitFor();
+
+    const visited = [];
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press("Tab");
+      const info = await page.evaluate(() => ({
+        id: document.activeElement?.id || document.activeElement?.tagName,
+        visible: (() => {
+          const el = document.activeElement;
+          if (!el) return false;
+          const s = getComputedStyle(el);
+          return (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || (s.boxShadow && s.boxShadow !== "none");
+        })(),
+      }));
+      visited.push(info);
+    }
+    const ids = visited.map((v) => v.id);
+    assert.ok(ids.indexOf("email") !== -1 && ids.indexOf("password") !== -1, `orden de tabulación: ${ids}`);
+    assert.ok(ids.indexOf("email") < ids.indexOf("password"), `orden de tabulación: ${ids}`);
+    for (const info of visited.filter((v) => v.id === "email" || v.id === "password")) {
+      assert.equal(info.visible, true, `sin foco visible en ${info.id}`);
+    }
+    await context.close();
+  });
+
+  test("el diálogo de reautenticación atrapa el foco, se cierra con Escape y devuelve el foco", async () => {
+    const { context, page } = await loggedInContext();
+    // Forzar la respuesta que abre el diálogo sin esperar la ventana de 15 minutos.
+    await page.route("**/admin-api/v1/admin-users/**", (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      return route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "reauth_required", message: "Reautentique para continuar." }),
+      });
+    });
+
+    await page.goto("/admin/admin-users");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Editar", exact: true }).first().click();
+    const save = page.getByRole("button", { name: "Guardar cambios", exact: true });
+    await save.click();
+
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor();
+    assert.equal(await dialog.getAttribute("aria-modal"), "true");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "reauth-password");
+
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("Tab");
+      const inside = await page.evaluate(() => !!document.activeElement?.closest("[role='dialog']"));
+      assert.equal(inside, true, "el foco salió del diálogo");
+    }
+
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    // El foco se devuelve de forma asíncrona mientras el botón termina de habilitarse.
+    await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "Guardar cambios", null, { timeout: 5000 });
+    await context.close();
+  });
+});
