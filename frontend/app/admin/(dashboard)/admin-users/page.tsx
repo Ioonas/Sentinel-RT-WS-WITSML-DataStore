@@ -16,6 +16,7 @@ import { EmptyRow, PermissionChecks, Section, Tags } from "@/components/dashboar
 import {
   ApiError,
   api,
+  type InvitationSummaryView,
   type InvitationView,
   type PermissionView,
   type UserView,
@@ -37,6 +38,7 @@ export default function AdminUsersPage() {
   const { runWithReauth } = useReauth();
   const users = useApiQuery<UserView[]>("/admin-users");
   const permissions = useApiQuery<PermissionView[]>("/permissions");
+  const pendingInvitations = useApiQuery<InvitationSummaryView[]>("/invitations");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("auditor");
   const [invitePermissions, setInvitePermissions] = useState<string[]>([]);
@@ -82,6 +84,7 @@ export default function AdminUsersPage() {
       setInviteEmail("");
       setInvitePermissions([]);
       users.reload();
+      pendingInvitations.reload();
     } catch (caught) {
       setInviteError(caught instanceof ApiError ? caught.message : "No se pudo crear la invitación.");
     } finally {
@@ -242,6 +245,51 @@ export default function AdminUsersPage() {
           </Section>
         </Card>
       </div>
+
+      <Card>
+        <Section
+          title="Invitaciones pendientes"
+          description="Invitaciones no aceptadas y no vencidas. Los enlaces no se vuelven a mostrar; para reenviar, cree una nueva invitación."
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => pendingInvitations.reload()}>
+              Actualizar
+            </Button>
+          }
+        >
+          {pendingInvitations.loading ? (
+            <Spinner />
+          ) : pendingInvitations.error ? (
+            <Alert>{pendingInvitations.error.message}</Alert>
+          ) : (
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Correo</th>
+                    <th>Rol</th>
+                    <th>Creada</th>
+                    <th>Vence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingInvitations.data && pendingInvitations.data.length > 0 ? (
+                    pendingInvitations.data.map((item) => (
+                      <tr key={item.id}>
+                        <td className={styles.wrap}>{item.email}</td>
+                        <td>{item.role}</td>
+                        <td className={styles.faint}>{formatDateTime(item.created_at)}</td>
+                        <td className={styles.faint}>{formatDateTime(item.expires_at)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <EmptyRow colSpan={4}>No hay invitaciones pendientes.</EmptyRow>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      </Card>
 
       {selected ? (
         <Card>

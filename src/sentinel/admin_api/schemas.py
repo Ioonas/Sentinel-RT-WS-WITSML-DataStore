@@ -155,6 +155,15 @@ class InvitationView(BaseModel):
     token: str | None = None
 
 
+class InvitationSummaryView(BaseModel):
+    id: str
+    email: str
+    role: str
+    created_by: str
+    created_at: datetime | None
+    expires_at: datetime
+
+
 class AcceptInvitationRequest(StrictModel):
     token: str = Field(min_length=10, max_length=512)
     password: str = Field(min_length=15, max_length=1024)
