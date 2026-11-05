@@ -315,3 +315,66 @@ describe("criterio 5: teclado, foco visible y diálogos (ui-spec §9)", () => {
     await context.close();
   });
 });
+
+describe("criterio 5: teclado en todas las vistas privadas", () => {
+  // Marca los controles visibles y habilitados en orden de DOM y devuelve su número.
+  const TAG_CONTROLS = () => {
+    const candidates = Array.from(
+      document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    ).filter((el) => {
+      if (el.disabled || el.closest("[aria-hidden='true']")) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden";
+    });
+    candidates.forEach((el, index) => el.setAttribute("data-e2e-k", String(index)));
+    return candidates.map((el) => (el.textContent || el.getAttribute("aria-label") || el.id || el.tagName).trim().slice(0, 40) || el.tagName);
+  };
+
+  const FOCUS_STATE = () => {
+    const el = document.activeElement;
+    if (!el || !el.hasAttribute("data-e2e-k")) return null;
+    const s = getComputedStyle(el);
+    const visible = (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || (s.boxShadow && s.boxShadow !== "none");
+    return { k: Number(el.getAttribute("data-e2e-k")), visible, label: (el.textContent || el.getAttribute("aria-label") || el.id || el.tagName).trim().slice(0, 40) };
+  };
+
+  test("cada vista privada alcanza todos sus controles con Tab, en orden y con foco visible", async () => {
+    const { context, page } = await loggedInContext();
+    const problems = {};
+
+    for (const route of PRIVATE_ROUTES) {
+      await page.goto(route);
+      await page.waitForLoadState("networkidle");
+      const labels = await page.evaluate(TAG_CONTROLS);
+      const total = labels.length;
+      await page.evaluate(() => document.activeElement?.blur());
+
+      const reached = new Map();
+      const order = [];
+      // Los campos de fecha y hora tienen paradas internas de Tab; el límite es holgado y el ciclo corta antes.
+      for (let i = 0; i < total * 4 + 10; i++) {
+        await page.keyboard.press("Tab");
+        const state = await page.evaluate(FOCUS_STATE);
+        if (!state) continue;
+        // Al volver al primer control se completó un ciclo: no seguir contando.
+        if (order.length > 0 && state.k === order[0]) break;
+        order.push(state.k);
+        if (!reached.has(state.k)) reached.set(state.k, state);
+      }
+
+      const issues = [];
+      for (let k = 0; k < total; k++) {
+        if (!reached.has(k)) issues.push(`control ${k} "${labels[k]}" no alcanzable con Tab`);
+      }
+      const sorted = order.every((value, index) => index === 0 || value >= order[index - 1]);
+      if (!sorted) issues.push("el orden de Tab no sigue el orden del documento");
+      for (const state of reached.values()) {
+        if (!state.visible) issues.push(`sin foco visible en "${state.label}"`);
+      }
+      if (issues.length > 0) problems[route] = issues;
+    }
+
+    await context.close();
+    assert.deepEqual(problems, {}, "problemas de teclado por vista");
+  });
+});
