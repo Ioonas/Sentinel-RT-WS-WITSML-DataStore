@@ -20,6 +20,7 @@ import {
   type Grant,
   type ServiceAccountView,
 } from "@/lib/api";
+import { WellPicker } from "@/components/WellPicker";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
@@ -40,7 +41,7 @@ export default function ServiceAccountsPage() {
   const [grants, setGrants] = useState<Grant[]>([
     { object_type: "*", action: "read", uid_well: null },
   ]);
-  const [wellScope, setWellScope] = useState("");
+  const [selectedWells, setSelectedWells] = useState<string[]>([]);
   const [cascade, setCascade] = useState(false);
   const [replacesId, setReplacesId] = useState("");
   const [graceDays, setGraceDays] = useState("7");
@@ -63,12 +64,7 @@ export default function ServiceAccountsPage() {
           name,
           role,
           grants,
-          well_scope: wellScope.trim()
-            ? wellScope
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean)
-            : null,
+          well_scope: selectedWells.length > 0 ? selectedWells : null,
           can_cascade_delete: cascade,
           replaces_account_id: replacesId || null,
           replacement_grace_days: replacesId ? Number(graceDays) : undefined,
@@ -76,7 +72,7 @@ export default function ServiceAccountsPage() {
       });
       setCreated(result);
       setName("");
-      setWellScope("");
+      setSelectedWells([]);
       setCascade(false);
       setReplacesId("");
       setGraceDays("7");
@@ -264,18 +260,7 @@ export default function ServiceAccountsPage() {
                 <span className={styles.statLabel}>Permisos</span>
                 <GrantEditor grants={grants} onChange={setGrants} />
               </div>
-              <Field
-                label="Alcance por pozo"
-                hint="Lista separada por comas de uidWell. Vacío significa sin restricción."
-                htmlFor="account-scope"
-              >
-                <Input
-                  id="account-scope"
-                  placeholder="pozo-1, pozo-2"
-                  value={wellScope}
-                  onChange={(event) => setWellScope(event.target.value)}
-                />
-              </Field>
+              <WellPicker value={selectedWells} onChange={setSelectedWells} />
               <label className={styles.statLabel}>
                 <input
                   type="checkbox"
