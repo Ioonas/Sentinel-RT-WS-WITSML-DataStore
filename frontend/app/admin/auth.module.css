@@ -4,8 +4,8 @@
   place-items: center;
   padding: var(--space-6);
   background:
-    radial-gradient(900px 500px at 10% -10%, rgba(224, 122, 47, 0.1), transparent 60%),
-    radial-gradient(700px 400px at 100% 100%, rgba(127, 196, 255, 0.06), transparent 60%),
+    radial-gradient(900px 500px at 10% -10%, var(--color-accent-glow), transparent 60%),
+    radial-gradient(700px 400px at 100% 100%, var(--color-focus-glow), transparent 60%),
     var(--color-bg);
 }
 

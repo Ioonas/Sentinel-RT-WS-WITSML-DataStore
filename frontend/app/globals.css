@@ -1,6 +1,6 @@
 :root {
-  --font-sans: "Roboto Flex", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --font-sans: "Roboto Flex Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Cascadia Mono", Consolas, monospace;
 
   --color-bg: #0d1216;
   --color-surface: #151d23;
@@ -10,7 +10,7 @@
   --color-border-strong: #3c5261;
   --color-text: #e9eef2;
   --color-text-muted: #9fb0bc;
-  --color-text-faint: #748796;
+  --color-text-faint: #8a9dab;
   --color-accent: #e07a2f;
   --color-accent-strong: #f08a3c;
   --color-accent-soft: rgba(224, 122, 47, 0.14);
@@ -21,6 +21,15 @@
   --color-danger: #e05b5b;
   --color-danger-soft: rgba(224, 91, 91, 0.14);
   --color-focus: #7fc4ff;
+  --color-on-accent: #10161a;
+  --color-focus-ring: rgba(127, 196, 255, 0.16);
+  --color-overlay: rgba(5, 8, 10, 0.72);
+  --color-accent-glow: rgba(224, 122, 47, 0.1);
+  --color-focus-glow: rgba(127, 196, 255, 0.06);
+  --color-ok-text: #8ee0b7;
+  --color-warn-text: #f0d18a;
+  --color-danger-text: #ffb0b0;
+  --color-info-text: #f4c9a5;
 
   --radius-sm: 4px;
   --radius-md: 8px;
