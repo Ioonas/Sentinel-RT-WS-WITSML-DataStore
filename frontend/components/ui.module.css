@@ -30,7 +30,7 @@
 .primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: #10161a;
+  color: var(--color-on-accent);
 }
 
 .primary:hover:not(:disabled) {
@@ -52,11 +52,11 @@
 .danger {
   background: var(--color-danger-soft);
   border-color: var(--color-danger);
-  color: #ffb9b9;
+  color: var(--color-danger-text);
 }
 
 .danger:hover:not(:disabled) {
-  background: rgba(224, 91, 91, 0.24);
+  background: var(--color-danger);
 }
 
 .ghost {
@@ -129,7 +129,7 @@
 .input:focus {
   outline: none;
   border-color: var(--color-focus);
-  box-shadow: 0 0 0 3px rgba(127, 196, 255, 0.16);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
 textarea.input {
@@ -163,21 +163,21 @@ textarea.input {
 }
 
 .ok {
-  color: #8ee0b7;
+  color: var(--color-ok-text);
   background: var(--color-ok-soft);
-  border-color: rgba(70, 183, 132, 0.4);
+  border-color: var(--color-ok);
 }
 
 .warn {
-  color: #f0d18a;
+  color: var(--color-warn-text);
   background: var(--color-warn-soft);
-  border-color: rgba(224, 178, 63, 0.4);
+  border-color: var(--color-warn);
 }
 
 .danger {
-  color: #ffb0b0;
+  color: var(--color-danger-text);
   background: var(--color-danger-soft);
-  border-color: rgba(224, 91, 91, 0.4);
+  border-color: var(--color-danger);
 }
 
 .neutral {
@@ -197,25 +197,25 @@ textarea.input {
 .alert.danger {
   background: var(--color-danger-soft);
   border-color: var(--color-danger);
-  color: #ffd0d0;
+  color: var(--color-danger-text);
 }
 
 .alert.warn {
   background: var(--color-warn-soft);
   border-color: var(--color-warn);
-  color: #f6e2b0;
+  color: var(--color-warn-text);
 }
 
 .alert.ok {
   background: var(--color-ok-soft);
   border-color: var(--color-ok);
-  color: #b7efd5;
+  color: var(--color-ok-text);
 }
 
 .alert.info {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
-  color: #f4c9a5;
+  color: var(--color-info-text);
 }
 
 .empty {
