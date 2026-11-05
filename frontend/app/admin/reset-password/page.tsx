@@ -63,14 +63,14 @@ export default function ResetPasswordPage() {
           <form className={styles.form} onSubmit={submit}>
             <Field
               label="Nueva contraseña"
-              hint="Mínimo 12 caracteres, con mayúsculas, minúsculas y dígitos."
+              hint="Mínimo 15 caracteres, con mayúsculas, minúsculas y dígitos."
               htmlFor="password"
             >
               <Input
                 id="password"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={15}
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
