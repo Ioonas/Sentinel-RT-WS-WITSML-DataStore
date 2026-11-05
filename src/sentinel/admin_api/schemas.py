@@ -51,12 +51,19 @@ class SetupStatusView(BaseModel):
     setup_completed: bool
 
 
+class ServiceInfoUpdateRequest(StrictModel):
+    name: str = Field(min_length=3, max_length=255)
+    description: str = Field(min_length=1, max_length=512)
+
+
 class SetupRequest(StrictModel):
     contact_email: str = Field(min_length=3, max_length=255)
     contact_phone: str = Field(min_length=6, max_length=32)
     admin_email: str = Field(min_length=3, max_length=255)
     admin_name: str = Field(min_length=1, max_length=255)
     admin_password: str = Field(min_length=12, max_length=1024)
+    server_name: str | None = Field(default=None, min_length=3, max_length=255)
+    server_description: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class ContactUpdateRequest(StrictModel):
@@ -91,6 +98,11 @@ class ServiceAccountCreate(StrictModel):
     role: ServiceRole
     grants: list[GrantIn] = Field(min_length=1)
     well_scope: list[str] | None = None
+    # Fijo para toda la vida de la cuenta: no es editable con PATCH.
+    can_cascade_delete: bool = False
+    # Cuenta a la que sustituye; la anterior sigue activa durante el periodo indicado.
+    replaces_account_id: str | None = None
+    replacement_grace_days: int = Field(default=7, ge=0, le=90)
 
 
 class ServiceAccountUpdate(StrictModel):
@@ -110,6 +122,9 @@ class ServiceAccountView(BaseModel):
     created_at: datetime | None = None
     last_used_at: datetime | None = None
     rotated_at: datetime | None = None
+    can_cascade_delete: bool = False
+    replaced_by_id: str | None = None
+    replacement_expires_at: datetime | None = None
 
 
 class CredentialView(BaseModel):

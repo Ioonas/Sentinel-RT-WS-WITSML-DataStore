@@ -67,6 +67,8 @@ async def run_setup(
         admin_name=payload.admin_name,
         admin_password=payload.admin_password,
         correlation_id=correlation,
+        server_name=payload.server_name,
+        server_description=payload.server_description,
     )
     result = await services.identities.login(
         payload.admin_email, payload.admin_password

@@ -299,6 +299,11 @@ class ServiceAccountRow(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    can_cascade_delete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    replaced_by_id: Mapped[str | None] = mapped_column(String(64))
+    replacement_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class MailOutboxRow(Base):

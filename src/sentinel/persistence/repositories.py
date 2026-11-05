@@ -1107,6 +1107,9 @@ class SqlAlchemyIdentityRepository:
         row.last_used_at = account.last_used_at
         row.failed_attempts = account.failed_attempts
         row.locked_until = account.locked_until
+        row.can_cascade_delete = account.can_cascade_delete
+        row.replaced_by_id = account.replaced_by_id
+        row.replacement_expires_at = account.replacement_expires_at
         await self._session.flush()
 
     async def delete_service_account(self, account_id: str) -> None:
@@ -1293,6 +1296,9 @@ class SqlAlchemyIdentityRepository:
             rotated_at=row.rotated_at,
             failed_attempts=row.failed_attempts,
             locked_until=row.locked_until,
+            can_cascade_delete=row.can_cascade_delete,
+            replaced_by_id=row.replaced_by_id,
+            replacement_expires_at=row.replacement_expires_at,
         )
 
     @staticmethod

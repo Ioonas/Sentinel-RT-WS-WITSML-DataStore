@@ -97,6 +97,8 @@ class IdentityService:
             self._hasher.verify(secret, "$argon2id$v=19$m=65536,t=3,p=2$aaaaaaaaaaaaaaaa$")
             return None
         now = self._clock.now()
+        if account.is_retired(now):
+            return None
         if _is_locked(account.locked_until, now):
             # Mismo coste que un intento real para no revelar el estado del bloqueo.
             self._hasher.verify(secret, account.credential_hash)
@@ -118,6 +120,9 @@ class IdentityService:
         role: ServiceRole,
         grants: list[Grant],
         well_scope: set[str] | None,
+        can_cascade_delete: bool = False,
+        replaces: ServiceAccountRecord | None = None,
+        replacement_grace: timedelta = timedelta(days=7),
     ) -> tuple[ServiceAccountRecord, str]:
         if not _ACCOUNT_NAME.match(name):
             raise ValidationError(
@@ -126,6 +131,8 @@ class IdentityService:
         if await self._repo.get_service_account_by_name(name) is not None:
             raise ConflictError("Ya existe una cuenta de servicio con ese nombre.")
         self._validate_grants(role, grants)
+        if replaces is not None and replaces.replaced_by_id is not None:
+            raise ConflictError("La cuenta indicada ya fue reemplazada.")
         secret = self._new_secret()
         now = self._clock.now()
         account = ServiceAccountRecord(
@@ -138,8 +145,14 @@ class IdentityService:
             well_scope=frozenset(well_scope) if well_scope else None,
             created_at=now,
             rotated_at=now,
+            can_cascade_delete=can_cascade_delete,
         )
         await self._repo.save_service_account(account)
+        if replaces is not None:
+            # La cuenta anterior sigue activa durante la transición y luego se retira.
+            replaces.replaced_by_id = account.id
+            replaces.replacement_expires_at = now + replacement_grace
+            await self._repo.save_service_account(replaces)
         return account, secret
 
     async def update_service_account(
