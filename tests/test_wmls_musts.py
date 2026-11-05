@@ -1047,3 +1047,33 @@ async def test_acceptance_18_batch_conflict_persists_nothing(
     unchanged_b = await read_well(admin_client, secret, "w-b")
     assert "<name>Well B</name>" in unchanged_b
     assert well_last_change(unchanged_b) == token_b
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Un lote con el mismo uid dos veces hoy aplica la fusión sobre el "
+    "estado previo y pierde la primera escritura sin error. Quitar xfail al corregir.",
+)
+async def test_acceptance_18_duplicate_uid_in_batch_is_rejected(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    secret = await create_writer(admin_client, csrf)
+    await create_parents(admin_client, secret)
+    original = await read_well(admin_client, secret, "w-a")
+    token_a = well_last_change(original)
+
+    # Mismo uid dos veces con el mismo token válido: el lote debe rechazarse
+    # completo y no dejar que la segunda entrada sobrescriba a la primera.
+    batch = await update_well(
+        admin_client,
+        secret,
+        f'<wells xmlns="{WITSML_NS}" version="1.4.1.1">'
+        f'{well_element("w-a", "Dup 1", token_a)}'
+        f'{well_element("w-a", "Dup 2", token_a)}'
+        "</wells>",
+    )
+    assert result(batch) != 1, field(batch, "SuppMsgOut")
+
+    unchanged = await read_well(admin_client, secret, "w-a")
+    assert "<name>Well A</name>" in unchanged
+    assert well_last_change(unchanged) == token_a
