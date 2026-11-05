@@ -32,7 +32,7 @@ def clock() -> FixedClock:
 
 @pytest_asyncio.fixture
 async def lockout_client(clock: FixedClock) -> AsyncIterator[AsyncClient]:
-    instance = Container(build_settings(), clock=clock)
+    instance = Container(build_settings(), clock=clock, smtp_check=lambda: None)
     async with instance.engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)

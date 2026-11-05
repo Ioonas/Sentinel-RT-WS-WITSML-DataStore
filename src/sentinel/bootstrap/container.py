@@ -6,7 +6,7 @@ de entrada reciben servicios ya construidos y no importan persistencia.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
@@ -22,6 +22,7 @@ from sentinel.audit_config.service import (
 from sentinel.bootstrap.settings import Settings
 from sentinel.identity_access.passwords import Argon2PasswordHasher, Sha256TokenHasher
 from sentinel.identity_access.service import IdentityService
+from sentinel.mail_worker.probe import check_smtp
 from sentinel.persistence.database import create_engine, create_session_factory
 from sentinel.persistence.repositories import SqlAlchemyRepositories
 from sentinel.shared.clock import Clock, SystemClock
@@ -53,9 +54,13 @@ class Container:
         *,
         clock: Clock | None = None,
         ids: IdGenerator | None = None,
+        smtp_check: Callable[[], None] | None = None,
     ) -> None:
         self.settings = settings
         self.clock = clock or SystemClock()
+        self.smtp_check: Callable[[], None] = smtp_check or (
+            lambda: check_smtp(settings)
+        )
         self.ids = ids or UuidGenerator()
         self.engine = create_engine(settings.database_url)
         self.session_factory: async_sessionmaker[AsyncSession] = create_session_factory(
@@ -78,7 +83,9 @@ class Container:
             )
             config = ConfigService(repos.config, self.clock)
             audit = AuditService(repos.audit, self.clock)
-            setup = SetupService(config, identities, audit, self.clock)
+            setup = SetupService(
+                config, identities, audit, self.clock, smtp_check=self.smtp_check
+            )
             mail = MailService(
                 repos.mail, self.clock, self.ids, self.settings.public_base_url
             )

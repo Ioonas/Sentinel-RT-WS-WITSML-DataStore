@@ -75,6 +75,7 @@ async def create_writer(client: AsyncClient, csrf: str) -> str:
         json={
             "name": "acme.writer",
             "role": "writer",
+            "can_cascade_delete": True,
             "grants": [
                 {"object_type": "*", "action": "read"},
                 {"object_type": "*", "action": "write"},

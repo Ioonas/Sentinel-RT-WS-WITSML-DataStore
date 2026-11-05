@@ -33,6 +33,14 @@ class ServiceAccountRecord:
     rotated_at: datetime | None = None
     failed_attempts: int = 0
     locked_until: datetime | None = None
+    # El indicador de cascada se fija al crear la cuenta y no es editable.
+    can_cascade_delete: bool = False
+    replaced_by_id: str | None = None
+    replacement_expires_at: datetime | None = None
+
+    def is_retired(self, now: datetime) -> bool:
+        """Cuenta reemplazada cuyo periodo de transición ya terminó."""
+        return self.replacement_expires_at is not None and now >= self.replacement_expires_at
 
     def to_principal(self) -> Principal:
         return Principal(
@@ -42,6 +50,7 @@ class ServiceAccountRecord:
             role=self.role.value,
             grants=self.grants,
             well_scope=self.well_scope,
+            can_cascade_delete=self.can_cascade_delete,
         )
 
 

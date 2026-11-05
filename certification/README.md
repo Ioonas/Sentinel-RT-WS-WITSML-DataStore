@@ -12,7 +12,7 @@ del producto y **no** modifica los scripts de prueba ni los esquemas oficiales.
   `http://localhost:8000/witsml` con `SENTINEL_REQUIRE_HTTPS=false`.
 - Base de datos dedicada al ensayo. `load_data_set.exe` **escribe** el dataset
   estándar (pozos `Energistics-*`), así que no debe apuntarse a producción.
-- Una cuenta de servicio WMLS con permisos `read`/`write`/`delete` sobre `*`.
+- Una cuenta de servicio WMLS con permisos `read`/`write`/`delete` sobre `*` y con permiso de borrado en cascada (`can_cascade_delete = true`). El permiso de cascada se fija al crear la cuenta y no se puede cambiar después.
 
 ## 1. Preparar la cuenta de servicio
 
@@ -33,6 +33,7 @@ $account = Invoke-RestMethod -Method Post `
   -Body (@{
       name = "wcat.certification"
       role = "writer"
+      can_cascade_delete = $true
       grants = @(
         @{ object_type = "*"; action = "read" },
         @{ object_type = "*"; action = "write" },

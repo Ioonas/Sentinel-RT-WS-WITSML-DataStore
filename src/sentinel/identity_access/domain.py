@@ -109,6 +109,8 @@ class Principal:
     permissions: frozenset[str] = field(default_factory=frozenset)
     grants: tuple[Grant, ...] = ()
     well_scope: frozenset[str] | None = None
+    # Solo cuentas de servicio con este indicador pueden borrar en cascada (WMLS -414 si no).
+    can_cascade_delete: bool = False
 
     @property
     def is_superadmin(self) -> bool:

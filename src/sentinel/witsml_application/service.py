@@ -14,7 +14,7 @@ from typing import Any
 from lxml import etree
 
 from sentinel import API_VERSION, SCHEMA_VERSION
-from sentinel.audit_config.domain import AuditChannel, AuditResult
+from sentinel.audit_config.domain import AuditChannel, AuditResult, ServerConfig
 from sentinel.audit_config.service import AuditService, ConfigService
 from sentinel.identity_access.domain import Principal, WitsmlAction
 from sentinel.shared.clock import Clock
@@ -1457,6 +1457,15 @@ class WitsmlStoreService:
     # ------------------------------------------------------------------
     # DeleteFromStore
     # ------------------------------------------------------------------
+    @staticmethod
+    def _require_cascade(principal: Principal, config: ServerConfig) -> None:
+        if not (config.cascaded_delete and principal.can_cascade_delete):
+            raise WitsmlError(
+                WmlsCode.INSUFFICIENT_RIGHTS,
+                f"{base_message(int(WmlsCode.INSUFFICIENT_RIGHTS))} "
+                "cascadedDelete requiere el permiso de borrado en cascada.",
+            )
+
     async def delete_from_store(
         self,
         principal: Principal,
@@ -1469,6 +1478,8 @@ class WitsmlStoreService:
         started = time.perf_counter()
         options = xd.parse_options(options_xml)
         try:
+            if options.cascaded_delete:
+                self._require_cascade(principal, await self._config.get())
             result = await self._delete(
                 principal,
                 object_type=object_type,

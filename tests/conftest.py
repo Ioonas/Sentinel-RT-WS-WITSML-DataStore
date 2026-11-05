@@ -39,7 +39,8 @@ def test_settings() -> Settings:
 @pytest_asyncio.fixture
 async def container() -> AsyncIterator[Container]:
     resolved = test_settings()
-    instance = Container(resolved)
+    # En pruebas no se abre conexión SMTP real; el setup usa una comprobación simulada.
+    instance = Container(resolved, smtp_check=lambda: None)
     async with instance.engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)

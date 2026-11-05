@@ -57,11 +57,40 @@ class ConfigService:
         await self._repo.save(config)
         return config
 
-    async def complete_setup(self, *, email: str, phone: str, actor: str) -> ServerConfig:
+    async def update_service_info(self, *, name: str, description: str, actor: str) -> ServerConfig:
+        self.validate_service_info(name, description)
+        config = await self.get()
+        config.contact_name = name.strip()
+        config.description = description.strip()
+        config.updated_at = self._clock.now()
+        config.updated_by = actor
+        await self._repo.save(config)
+        return config
+
+    @staticmethod
+    def validate_service_info(name: str, description: str) -> None:
+        if not name or not name.strip():
+            raise ValidationError("El nombre del servicio es obligatorio.")
+        if not description or not description.strip():
+            raise ValidationError("La descripción del servicio es obligatoria.")
+
+    async def complete_setup(
+        self,
+        *,
+        email: str,
+        phone: str,
+        actor: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> ServerConfig:
         config = await self.get()
         if config.setup_completed:
             raise ConflictError("La configuración inicial ya fue completada.")
         self.validate_contact(email, phone)
+        if name is not None:
+            config.contact_name = name.strip()
+        if description is not None:
+            config.description = description.strip()
         config.contact_email = email.strip()
         config.contact_phone = phone.strip()
         config.setup_completed = True
@@ -134,11 +163,14 @@ class SetupService:
         identities: IdentityService,
         audit: AuditService,
         clock: Clock,
+        smtp_check: Callable[[], None] = lambda: None,
     ) -> None:
         self._config = config
         self._identities = identities
         self._audit = audit
         self._clock = clock
+        # Comprueba SMTP antes de completar el setup: el correo es obligatorio.
+        self._smtp_check = smtp_check
 
     async def status(self) -> bool:
         config = await self._config.get()
@@ -153,10 +185,18 @@ class SetupService:
         admin_name: str,
         admin_password: str,
         correlation_id: str,
+        server_name: str | None = None,
+        server_description: str | None = None,
     ) -> None:
         if await self.status():
             raise ConflictError("La configuración inicial ya fue completada.")
         ConfigService.validate_contact(contact_email, contact_phone)
+        if server_name is not None or server_description is not None:
+            ConfigService.validate_service_info(
+                server_name or "Sentinel RT&WS WITSML DataStore",
+                server_description or "Sentinel RT&WS WITSML DataStore 1.4.1.1",
+            )
+        self._smtp_check()
         user = await self._identities.create_admin_user(
             email=admin_email,
             display_name=admin_name,
@@ -164,7 +204,11 @@ class SetupService:
             password=admin_password,
         )
         await self._config.complete_setup(
-            email=contact_email, phone=contact_phone, actor=user.email
+            email=contact_email,
+            phone=contact_phone,
+            actor=user.email,
+            name=server_name,
+            description=server_description,
         )
         await self._audit.record(
             actor_id=user.id,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
@@ -37,6 +37,7 @@ from sentinel.admin_api.schemas import (
     ServiceAccountCreatedView,
     ServiceAccountUpdate,
     ServiceAccountView,
+    ServiceInfoUpdateRequest,
     UserView,
 )
 from sentinel.audit_config.domain import AuditEvent, ServerConfig
@@ -75,6 +76,9 @@ def _account_view(account: ServiceAccountRecord) -> ServiceAccountView:
         created_at=account.created_at,
         last_used_at=account.last_used_at,
         rotated_at=account.rotated_at,
+        can_cascade_delete=account.can_cascade_delete,
+        replaced_by_id=account.replaced_by_id,
+        replacement_expires_at=account.replacement_expires_at,
     )
 
 
@@ -152,6 +156,28 @@ async def update_contact(
     return _config_view(config)
 
 
+@router.put("/server-config/service-info", response_model=ServerConfigView)
+async def update_service_info(
+    payload: ServiceInfoUpdateRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_superadmin),
+    _: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ServerConfigView:
+    config = await services.config.update_service_info(
+        name=payload.name,
+        description=payload.description,
+        actor=auth.principal.name,
+    )
+    await audit(
+        services,
+        auth,
+        action="server-config.service-info.updated",
+        correlation=correlation_id(request),
+    )
+    return _config_view(config)
+
+
 # ----------------------------------------------------------------------
 # Cuentas de servicio y credenciales
 # ----------------------------------------------------------------------
@@ -175,11 +201,19 @@ async def create_service_account(
     _: AuthContext = Depends(require_csrf),
     services: RequestServices = Depends(get_services),
 ) -> ServiceAccountCreatedView:
+    replaces = (
+        await services.identities.get_service_account(payload.replaces_account_id)
+        if payload.replaces_account_id
+        else None
+    )
     account, secret = await services.identities.create_service_account(
         name=payload.name,
         role=payload.role,
         grants=[_grant_model(grant) for grant in payload.grants],
         well_scope=set(payload.well_scope) if payload.well_scope else None,
+        can_cascade_delete=payload.can_cascade_delete,
+        replaces=replaces,
+        replacement_grace=timedelta(days=payload.replacement_grace_days),
     )
     await audit(
         services,
@@ -188,7 +222,12 @@ async def create_service_account(
         correlation=correlation_id(request),
         object_type="service_account",
         object_uid=account.id,
-        details={"name": account.name, "role": account.role.value},
+        details={
+            "name": account.name,
+            "role": account.role.value,
+            "can_cascade_delete": account.can_cascade_delete,
+            "replaces": payload.replaces_account_id,
+        },
     )
     return ServiceAccountCreatedView(
         account=_account_view(account), credential=CredentialView(secret=secret)
