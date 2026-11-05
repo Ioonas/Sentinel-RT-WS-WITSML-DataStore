@@ -7,6 +7,19 @@ import { Alert, Button, Field, Input } from "@/components/ui";
 import { ApiError, api, type SetupStatus } from "@/lib/api";
 import styles from "../auth.module.css";
 
+// Solo se aceptan rutas internas de la administración; cualquier otra cosa va al resumen.
+function requestedNextPath(): string {
+  try {
+    const next = new URLSearchParams(window.location.search).get("next") ?? "";
+    if (next.startsWith("/admin/") && !next.startsWith("//") && !next.includes("\\")) {
+      return next;
+    }
+  } catch {
+    // Sin acceso a la URL (p. ej. entorno sin ventana): se usa la ruta por defecto.
+  }
+  return "/admin/overview";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null);
@@ -59,7 +72,7 @@ export default function LoginPage() {
           body: JSON.stringify({ email: form.email, password: form.password }),
         });
       }
-      router.push("/admin/overview");
+      router.push(requestedNextPath());
       router.refresh();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "No se pudo iniciar sesión.");
