@@ -137,7 +137,7 @@ export default function ProfilePage() {
                 </Field>
                 <Field
                   label="Nueva contraseña"
-                  hint="Mínimo 15 caracteres, con mayúsculas, minúsculas y dígitos."
+                  hint="Mínimo 15 caracteres, con al menos un dígito."
                   htmlFor="new-password"
                 >
                   <Input
