@@ -46,6 +46,12 @@ from sentinel.shared.ids import IdGenerator
 
 _ACCOUNT_NAME = re.compile(r"^[A-Za-z0-9._-]{3,64}$")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_SERVICE_CREDENTIAL = re.compile(r"[A-Za-z0-9._-]+")
+# Clientes WMLS que codifican Basic en base64 sin saltos de línea (por ejemplo, la
+# herramienta wPCTT) solo aceptan cabeceras de 76 caracteres base64 como máximo.
+# Eso equivale a "usuario:credencial" de hasta 57 bytes.
+_MAX_BASIC_PAIR_BYTES = 57
+_MIN_SERVICE_CREDENTIAL = 15
 
 SESSION_TTL = timedelta(hours=12)
 REAUTH_WINDOW = timedelta(minutes=15)
@@ -128,7 +134,9 @@ class IdentityService:
         can_cascade_delete: bool = False,
         replaces: ServiceAccountRecord | None = None,
         replacement_grace: timedelta = timedelta(days=7),
-    ) -> tuple[ServiceAccountRecord, str]:
+        credential: str | None = None,
+    ) -> tuple[ServiceAccountRecord, str | None]:
+        """Crea la cuenta. Devuelve el secreto generado, o None si lo definió el administrador."""
         if not _ACCOUNT_NAME.match(name):
             raise ValidationError(
                 "El nombre de la cuenta debe tener 3-64 caracteres [A-Za-z0-9._-]."
@@ -138,7 +146,13 @@ class IdentityService:
         self._validate_grants(role, grants)
         if replaces is not None and replaces.replaced_by_id is not None:
             raise ConflictError("La cuenta indicada ya fue reemplazada.")
-        secret = self._new_secret()
+        if credential is None:
+            secret = self._new_secret()
+            returned: str | None = secret
+        else:
+            self._validate_service_credential(name, credential)
+            secret = credential
+            returned = None
         now = self._clock.now()
         account = ServiceAccountRecord(
             id=self._ids.new_uid(),
@@ -158,7 +172,7 @@ class IdentityService:
             replaces.replaced_by_id = account.id
             replaces.replacement_expires_at = now + replacement_grace
             await self._repo.save_service_account(replaces)
-        return account, secret
+        return account, returned
 
     async def update_service_account(
         self,
@@ -482,6 +496,23 @@ class IdentityService:
     # ------------------------------------------------------------------
     def _new_secret(self) -> str:
         return f"srtws_{self._ids.new_token(32)}"
+
+    def _validate_service_credential(self, name: str, credential: str) -> None:
+        if not _SERVICE_CREDENTIAL.fullmatch(credential):
+            raise ValidationError(
+                "La credencial solo puede contener letras, números, punto, guion y guion bajo."
+            )
+        max_length = _MAX_BASIC_PAIR_BYTES - len(name) - 1
+        if max_length < _MIN_SERVICE_CREDENTIAL:
+            raise ValidationError(
+                "El nombre es demasiado largo para una credencial compatible con clientes WMLS."
+            )
+        if len(credential) > max_length:
+            raise ValidationError(
+                f"Con este nombre, la credencial puede tener como máximo {max_length} caracteres "
+                "para que los clientes WMLS la acepten."
+            )
+        self._validate_password(credential, context=context_terms(name))
 
     def _validate_password(self, password: str, *, context: frozenset[str] = frozenset()) -> None:
         if len(password) < 15:

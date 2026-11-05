@@ -107,6 +107,9 @@ class ServiceAccountCreate(StrictModel):
     # Cuenta a la que sustituye; la anterior sigue activa durante el periodo indicado.
     replaces_account_id: str | None = None
     replacement_grace_days: int = Field(default=7, ge=0, le=90)
+    # Opcional: si se omite, el servidor genera la credencial y la muestra una vez.
+    # Las reglas de forma y longitud se validan en el núcleo.
+    credential: str | None = Field(default=None, max_length=128)
 
 
 class ServiceAccountUpdate(StrictModel):
@@ -132,7 +135,8 @@ class ServiceAccountView(BaseModel):
 
 
 class CredentialView(BaseModel):
-    secret: str
+    # None cuando la credencial la definió el administrador: no se devuelve nunca.
+    secret: str | None = None
     message: str = "El secreto se muestra una sola vez."
 
 

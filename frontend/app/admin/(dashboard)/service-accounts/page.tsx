@@ -44,6 +44,8 @@ export default function ServiceAccountsPage() {
   const [selectedWells, setSelectedWells] = useState<string[]>([]);
   const [cascade, setCascade] = useState(false);
   const [replacesId, setReplacesId] = useState("");
+  const [credential, setCredential] = useState("");
+  const [credentialConfirm, setCredentialConfirm] = useState("");
   const [graceDays, setGraceDays] = useState("7");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -53,6 +55,10 @@ export default function ServiceAccountsPage() {
 
   async function create(event: FormEvent) {
     event.preventDefault();
+    if (credential && credential !== credentialConfirm) {
+      setFormError("La credencial y su repetición no coinciden.");
+      return;
+    }
     setBusy(true);
     setFormError(null);
     setCreated(null);
@@ -68,6 +74,7 @@ export default function ServiceAccountsPage() {
           can_cascade_delete: cascade,
           replaces_account_id: replacesId || null,
           replacement_grace_days: replacesId ? Number(graceDays) : undefined,
+          credential: credential || undefined,
         }),
       });
       setCreated(result);
@@ -76,6 +83,8 @@ export default function ServiceAccountsPage() {
       setCascade(false);
       setReplacesId("");
       setGraceDays("7");
+      setCredential("");
+      setCredentialConfirm("");
       setGrants([{ object_type: "*", action: "read", uid_well: null }]);
       reload();
     } catch (caught) {
@@ -108,7 +117,7 @@ export default function ServiceAccountsPage() {
       const result = await api<CredentialView>(`/service-accounts/${account.id}/rotate-credential`, {
         method: "POST",
       });
-      setRotated({ name: account.name, secret: result.secret });
+      setRotated({ name: account.name, secret: result.secret ?? "" });
       reload();
     } catch (caught) {
       setActionError(caught instanceof ApiError ? caught.message : "No se pudo rotar la credencial.");
@@ -140,8 +149,15 @@ export default function ServiceAccountsPage() {
 
       {created ? (
         <Alert tone="ok">
-          Cuenta <strong>{created.account.name}</strong> creada. Guarde ahora la credencial; no volverá a mostrarse.
-          <code className={styles.secret}>{created.credential.secret}</code>
+          Cuenta <strong>{created.account.name}</strong> creada.{" "}
+          {created.credential.secret ? (
+            <>
+              Guarde ahora la credencial; no volverá a mostrarse.
+              <code className={styles.secret}>{created.credential.secret}</code>
+            </>
+          ) : (
+            created.credential.message
+          )}
         </Alert>
       ) : null}
 
@@ -272,6 +288,33 @@ export default function ServiceAccountsPage() {
               <p className={styles.faint}>
                 Solo aplica a esta cuenta y no se puede cambiar después. Sin esta opción, borrar un pozo con hijos devuelve error.
               </p>
+              <Field
+                label="Credencial (opcional)"
+                htmlFor="account-credential"
+                hint={`Vacía: el servidor genera una y la muestra una vez. Mínimo 15 caracteres; letras, números, punto, guion y guion bajo. Usuario y credencial juntos: máximo 57 caracteres (${Math.max(0, 56 - name.length)} para este nombre).`}
+              >
+                <Input
+                  id="account-credential"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={15}
+                  maxLength={Math.max(0, 56 - name.length)}
+                  pattern="[A-Za-z0-9._\-]*"
+                  value={credential}
+                  onChange={(event) => setCredential(event.target.value)}
+                />
+              </Field>
+              {credential ? (
+                <Field label="Repetir credencial" htmlFor="account-credential-confirm">
+                  <Input
+                    id="account-credential-confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    value={credentialConfirm}
+                    onChange={(event) => setCredentialConfirm(event.target.value)}
+                  />
+                </Field>
+              ) : null}
               <Field
                 label="Reemplaza a una cuenta existente"
                 hint="Opcional. La cuenta anterior sigue activa durante el periodo de gracia y luego se retira."

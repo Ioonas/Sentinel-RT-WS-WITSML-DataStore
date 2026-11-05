@@ -119,7 +119,7 @@ export type ServiceAccountView = {
   replacement_expires_at: string | null;
 };
 
-export type CredentialView = { secret: string; message: string };
+export type CredentialView = { secret: string | null; message: string };
 
 export type InvitationSummaryView = {
   id: string;

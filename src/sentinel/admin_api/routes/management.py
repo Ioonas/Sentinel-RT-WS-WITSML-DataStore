@@ -228,6 +228,7 @@ async def create_service_account(
         can_cascade_delete=payload.can_cascade_delete,
         replaces=replaces,
         replacement_grace=timedelta(days=payload.replacement_grace_days),
+        credential=payload.credential,
     )
     await audit(
         services,
@@ -241,11 +242,20 @@ async def create_service_account(
             "role": account.role.value,
             "can_cascade_delete": account.can_cascade_delete,
             "replaces": payload.replaces_account_id,
+            "credential_source": "generated" if secret is not None else "admin",
         },
     )
-    return ServiceAccountCreatedView(
-        account=_account_view(account), credential=CredentialView(secret=secret)
-    )
+    if secret is None:
+        credential = CredentialView(
+            secret=None,
+            message=(
+                "Credencial definida por el administrador. "
+                "No se muestra ni se guarda en texto claro."
+            ),
+        )
+    else:
+        credential = CredentialView(secret=secret)
+    return ServiceAccountCreatedView(account=_account_view(account), credential=credential)
 
 
 @router.get("/service-accounts/{account_id}", response_model=ServiceAccountView)

@@ -93,6 +93,54 @@ async def test_service_account_secret_is_returned_once(
     assert "secret" not in listing.json()[0]
 
 
+async def test_service_account_accepts_admin_defined_credential(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    response = await admin_client.post(
+        "/admin-api/v1/service-accounts",
+        headers={"x-csrf-token": csrf},
+        json={
+            "name": "wcat.certification",
+            "role": "writer",
+            "can_cascade_delete": True,
+            "grants": [
+                {"object_type": "*", "action": "read"},
+                {"object_type": "*", "action": "write"},
+                {"object_type": "*", "action": "delete"},
+            ],
+            "credential": "Operativa-Certif-2026-A",
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["credential"]["secret"] is None
+    assert body["account"]["can_cascade_delete"] is True
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        "Corta-1",                      # menos de 15 caracteres
+        "Clave con espacios 2026",      # caracteres no permitidos
+        "A" * 46,                       # "acme.reader:" + 46 supera 57 bytes
+    ],
+)
+async def test_service_account_rejects_invalid_admin_credential(
+    admin_client: AsyncClient, csrf: str, credential: str
+) -> None:
+    response = await admin_client.post(
+        "/admin-api/v1/service-accounts",
+        headers={"x-csrf-token": csrf},
+        json={
+            "name": "acme.reader",
+            "role": "reader",
+            "grants": [{"object_type": "*", "action": "read"}],
+            "credential": credential,
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
 async def test_roles_permissions_and_audit(admin_client: AsyncClient) -> None:
     roles = await admin_client.get("/admin-api/v1/roles")
     assert roles.status_code == 200
