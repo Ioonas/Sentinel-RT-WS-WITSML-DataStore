@@ -16,9 +16,10 @@ import { EmptyRow, Section, Tags } from "@/components/dashboard";
 import { ApiError, api, type MessageView, type ObjectView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
+import { useReauth } from "@/components/Reauth";
 import styles from "../dashboard.module.css";
 
-const OBJECT_TYPES = ["well", "wellbore", "log", "trajectory"] as const;
+const OBJECT_TYPES = ["well", "wellbore", "log", "mudLog", "trajectory"] as const;
 
 function objectPath(type: string, uid: string, uidWell?: string | null, uidWellbore?: string | null) {
   const params = new URLSearchParams();
@@ -29,6 +30,7 @@ function objectPath(type: string, uid: string, uidWell?: string | null, uidWellb
 }
 
 export default function ObjectsPage() {
+  const { runWithReauth } = useReauth();
   const [objectType, setObjectType] = useState<string>("well");
   const [uidWell, setUidWell] = useState("");
   const [uidWellbore, setUidWellbore] = useState("");
@@ -98,12 +100,14 @@ export default function ObjectsPage() {
     setDeleteBusy(true);
     setActionError(null);
     try {
-      const result = await api<MessageView>(
+      const result = await runWithReauth(() =>
+        api<MessageView>(
         `${objectPath(deleteTarget.object_type, deleteTarget.uid, deleteTarget.uid_well, deleteTarget.uid_wellbore)}/delete`,
         {
           method: "POST",
           body: JSON.stringify({ reason, confirmation }),
         },
+        ),
       );
       setMessage(result.message);
       setDeleteTarget(null);

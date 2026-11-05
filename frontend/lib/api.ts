@@ -114,6 +114,9 @@ export type ServiceAccountView = {
   created_at: string | null;
   last_used_at: string | null;
   rotated_at: string | null;
+  can_cascade_delete: boolean;
+  replaced_by_id: string | null;
+  replacement_expires_at: string | null;
 };
 
 export type CredentialView = { secret: string; message: string };

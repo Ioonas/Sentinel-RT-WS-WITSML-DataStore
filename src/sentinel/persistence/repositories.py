@@ -1155,6 +1155,12 @@ class SqlAlchemyIdentityRepository:
             or 0
         )
 
+    async def update_session_authenticated_at(self, token_hash: str, at: datetime) -> None:
+        row = await self._session.get(AdminSessionRow, token_hash)
+        if row is not None:
+            row.authenticated_at = at
+            await self._session.flush()
+
     async def save_session(self, session: SessionRecord) -> None:
         self._session.add(
             AdminSessionRow(

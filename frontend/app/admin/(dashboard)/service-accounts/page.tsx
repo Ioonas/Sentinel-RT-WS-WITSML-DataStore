@@ -41,6 +41,9 @@ export default function ServiceAccountsPage() {
     { object_type: "*", action: "read", uid_well: null },
   ]);
   const [wellScope, setWellScope] = useState("");
+  const [cascade, setCascade] = useState(false);
+  const [replacesId, setReplacesId] = useState("");
+  const [graceDays, setGraceDays] = useState("7");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAccount | null>(null);
@@ -66,11 +69,17 @@ export default function ServiceAccountsPage() {
                 .map((item) => item.trim())
                 .filter(Boolean)
             : null,
+          can_cascade_delete: cascade,
+          replaces_account_id: replacesId || null,
+          replacement_grace_days: replacesId ? Number(graceDays) : undefined,
         }),
       });
       setCreated(result);
       setName("");
       setWellScope("");
+      setCascade(false);
+      setReplacesId("");
+      setGraceDays("7");
       setGrants([{ object_type: "*", action: "read", uid_well: null }]);
       reload();
     } catch (caught) {
@@ -186,10 +195,24 @@ export default function ServiceAccountsPage() {
                             <Tags values={account.well_scope ?? []} />
                           </td>
                           <td>
-                            <StatusBadge
-                              status={account.enabled ? "ok" : "danger"}
-                              label={account.enabled ? "Activa" : "Deshabilitada"}
-                            />
+                            <div className={styles.stack}>
+                              <StatusBadge
+                                status={account.enabled ? "ok" : "danger"}
+                                label={account.enabled ? "Activa" : "Deshabilitada"}
+                              />
+                              <StatusBadge
+                                status={account.can_cascade_delete ? "warn" : "neutral"}
+                                label={account.can_cascade_delete ? "Borrado en cascada" : "Sin borrado en cascada"}
+                              />
+                              {account.replaced_by_id ? (
+                                <span className={styles.faint}>
+                                  Reemplazada por {account.replaced_by_id}
+                                  {account.replacement_expires_at
+                                    ? ` · vence ${formatDateTime(account.replacement_expires_at)}`
+                                    : ""}
+                                </span>
+                              ) : null}
+                            </div>
                           </td>
                           <td className={styles.faint}>{formatDateTime(account.last_used_at)}</td>
                           <td>
@@ -253,6 +276,45 @@ export default function ServiceAccountsPage() {
                   onChange={(event) => setWellScope(event.target.value)}
                 />
               </Field>
+              <label className={styles.statLabel}>
+                <input
+                  type="checkbox"
+                  checked={cascade}
+                  onChange={(event) => setCascade(event.target.checked)}
+                />{" "}
+                Permitir borrado en cascada
+              </label>
+              <p className={styles.faint}>
+                Solo aplica a esta cuenta y no se puede cambiar después. Sin esta opción, borrar un pozo con hijos devuelve error.
+              </p>
+              <Field
+                label="Reemplaza a una cuenta existente"
+                hint="Opcional. La cuenta anterior sigue activa durante el periodo de gracia y luego se retira."
+                htmlFor="account-replaces"
+              >
+                <Select id="account-replaces" value={replacesId} onChange={(event) => setReplacesId(event.target.value)}>
+                  <option value="">Ninguna</option>
+                  {(data ?? [])
+                    .filter((account) => !account.replaced_by_id)
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              {replacesId ? (
+                <Field label="Días de gracia" hint="De 0 a 90. Por defecto, 7." htmlFor="account-grace">
+                  <Input
+                    id="account-grace"
+                    type="number"
+                    min={0}
+                    max={90}
+                    value={graceDays}
+                    onChange={(event) => setGraceDays(event.target.value)}
+                  />
+                </Field>
+              ) : null}
               <Button type="submit" variant="primary" disabled={busy}>
                 {busy ? "Creando…" : "Crear cuenta"}
               </Button>
