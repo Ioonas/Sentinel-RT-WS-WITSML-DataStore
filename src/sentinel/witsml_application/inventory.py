@@ -168,6 +168,14 @@ class InventoryService:
             )
         )
 
+    async def unknown_wells(self, uids: list[str]) -> list[str]:
+        """Devuelve los uid de pozo que no existen en el inventario, sin repetir."""
+        missing: list[str] = []
+        for uid in dict.fromkeys(uids):
+            if await self._wells.get(uid) is None:
+                missing.append(uid)
+        return missing
+
     def _repository(self, object_type: str):
         spec_for(object_type)
         return {

@@ -49,6 +49,7 @@ from sentinel.identity_access.domain import (
     Grant,
 )
 from sentinel.identity_access.ports import AdminUserRecord, ServiceAccountRecord
+from sentinel.shared.errors import ValidationError
 
 router = APIRouter(tags=["Administración"])
 
@@ -181,6 +182,17 @@ async def update_service_info(
 # ----------------------------------------------------------------------
 # Cuentas de servicio y credenciales
 # ----------------------------------------------------------------------
+async def _require_known_wells(services: RequestServices, uids: list[str] | None) -> None:
+    """El alcance por pozo solo puede apuntar a pozos que existen en el inventario."""
+    if not uids:
+        return
+    missing = await services.inventory.unknown_wells(uids)
+    if missing:
+        raise ValidationError(
+            "Pozos no encontrados en el inventario: " + ", ".join(missing)
+        )
+
+
 @router.get("/service-accounts", response_model=list[ServiceAccountView])
 async def list_service_accounts(
     _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
@@ -206,6 +218,7 @@ async def create_service_account(
         if payload.replaces_account_id
         else None
     )
+    await _require_known_wells(services, payload.well_scope)
     account, secret = await services.identities.create_service_account(
         name=payload.name,
         role=payload.role,
@@ -252,6 +265,7 @@ async def update_service_account(
     _: AuthContext = Depends(require_csrf),
     services: RequestServices = Depends(get_services),
 ) -> ServiceAccountView:
+    await _require_known_wells(services, payload.well_scope)
     account = await services.identities.update_service_account(
         account_id,
         enabled=payload.enabled,
