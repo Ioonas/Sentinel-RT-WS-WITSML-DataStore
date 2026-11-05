@@ -166,7 +166,7 @@ export default function LoginPage() {
               </Field>
               <Field
                 label="Contraseña inicial"
-                hint="Mínimo 15 caracteres, con al menos un dígito."
+                hint="Mínimo 15 caracteres."
                 htmlFor="password"
               >
                 <Input

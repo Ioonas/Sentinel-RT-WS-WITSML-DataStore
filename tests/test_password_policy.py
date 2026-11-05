@@ -22,6 +22,21 @@ def test_context_terms_include_product_and_account_fragments() -> None:
     assert "ana" not in terms  # fragmentos menores de 4 caracteres se ignoran
 
 
+async def test_setup_accepts_15_letters_without_digit(client: AsyncClient) -> None:
+    # Sin reglas de composición (NIST SP 800-63B-4): solo longitud, lista de comunes y contexto.
+    response = await client.post(
+        "/admin-api/v1/setup",
+        json={
+            "contact_email": CONTACT["contact_email"],
+            "contact_phone": CONTACT["contact_phone"],
+            "admin_email": "operador@example.com",
+            "admin_name": "Operador",
+            "admin_password": "Clave-Operativa-Sola",
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 async def test_setup_rejects_common_password(client: AsyncClient) -> None:
     response = await client.post(
         "/admin-api/v1/setup",

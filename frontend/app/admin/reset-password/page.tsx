@@ -63,7 +63,7 @@ export default function ResetPasswordPage() {
           <form className={styles.form} onSubmit={submit}>
             <Field
               label="Nueva contraseña"
-              hint="Mínimo 15 caracteres, con al menos un dígito."
+              hint="Mínimo 15 caracteres."
               htmlFor="password"
             >
               <Input
