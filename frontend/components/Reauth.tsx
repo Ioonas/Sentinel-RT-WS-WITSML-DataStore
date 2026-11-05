@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, PasswordInput } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import styles from "./Reauth.module.css";
 
@@ -150,9 +150,8 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
             <p className={styles.text}>Esta operación requiere reautenticación reciente.</p>
             {error ? <Alert tone="danger">{error}</Alert> : null}
             <Field label="Contraseña" htmlFor="reauth-password">
-              <Input
+              <PasswordInput
                 id="reauth-password"
-                type="password"
                 autoComplete="current-password"
                 required
                 autoFocus

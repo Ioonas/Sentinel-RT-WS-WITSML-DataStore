@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, PasswordInput } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import styles from "../auth.module.css";
 
@@ -66,9 +66,8 @@ export default function ResetPasswordPage() {
               hint="Mínimo 15 caracteres."
               htmlFor="password"
             >
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 autoComplete="new-password"
                 minLength={15}
                 required

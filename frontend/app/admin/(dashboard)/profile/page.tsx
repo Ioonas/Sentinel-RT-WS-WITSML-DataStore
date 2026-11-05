@@ -2,16 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import {
-  Alert,
-  Button,
-  Card,
-  Field,
-  Input,
-  PageHeader,
-  Spinner,
-  StatusBadge,
-} from "@/components/ui";
+import { Alert, Button, Card, Field, PageHeader, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
 import { Section, Tags } from "@/components/dashboard";
 import { ApiError, api, type MessageView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -126,9 +117,8 @@ export default function ProfilePage() {
               {formError ? <Alert>{formError}</Alert> : null}
               <form className={styles.form} onSubmit={changePassword}>
                 <Field label="Contraseña actual" htmlFor="current-password">
-                  <Input
+                  <PasswordInput
                     id="current-password"
-                    type="password"
                     autoComplete="current-password"
                     required
                     value={currentPassword}
@@ -140,9 +130,8 @@ export default function ProfilePage() {
                   hint="Mínimo 15 caracteres."
                   htmlFor="new-password"
                 >
-                  <Input
+                  <PasswordInput
                     id="new-password"
-                    type="password"
                     autoComplete="new-password"
                     minLength={15}
                     required
@@ -151,9 +140,8 @@ export default function ProfilePage() {
                   />
                 </Field>
                 <Field label="Confirmar nueva contraseña" htmlFor="confirm-password">
-                  <Input
+                  <PasswordInput
                     id="confirm-password"
-                    type="password"
                     autoComplete="new-password"
                     minLength={15}
                     required

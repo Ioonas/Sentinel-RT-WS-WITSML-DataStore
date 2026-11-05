@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -80,6 +81,44 @@ export function Field({
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={[styles.input, props.className].filter(Boolean).join(" ")} />;
+}
+
+export function PasswordInput({
+  minLength,
+  value,
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const [visible, setVisible] = useState(false);
+  const length = typeof value === "string" ? value.length : 0;
+  const belowMin = typeof minLength === "number" && length < minLength;
+  const counter =
+    typeof minLength === "number"
+      ? `${length} caracteres · mínimo ${minLength}`
+      : `${length} caracteres`;
+  return (
+    <div className={styles.passwordBlock}>
+      <div className={styles.passwordWrap}>
+        <Input
+          {...props}
+          type={visible ? "text" : "password"}
+          minLength={minLength}
+          value={value}
+          autoCapitalize="none"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          className={styles.passwordToggle}
+          aria-pressed={visible}
+          aria-label={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
+          onClick={() => setVisible((current) => !current)}
+        >
+          {visible ? "Ocultar" : "Mostrar"}
+        </button>
+      </div>
+      <span className={belowMin && length > 0 ? styles.counterWarn : styles.counter}>{counter}</span>
+    </div>
+  );
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {

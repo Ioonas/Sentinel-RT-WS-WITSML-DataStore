@@ -1,17 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import {
-  Alert,
-  Button,
-  Card,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  Spinner,
-  StatusBadge,
-} from "@/components/ui";
+import { Alert, Button, Card, Field, Input, PageHeader, Select, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
 import { EmptyRow, GrantEditor, Section, Tags } from "@/components/dashboard";
 import {
   ApiError,
@@ -293,9 +283,8 @@ export default function ServiceAccountsPage() {
                 htmlFor="account-credential"
                 hint={`Vacía: el servidor genera una y la muestra una vez. Mínimo 15 caracteres; letras, números, punto, guion y guion bajo. Usuario y credencial juntos: máximo 57 caracteres (${Math.max(0, 56 - name.length)} para este nombre).`}
               >
-                <Input
+                <PasswordInput
                   id="account-credential"
-                  type="password"
                   autoComplete="new-password"
                   minLength={15}
                   maxLength={Math.max(0, 56 - name.length)}
@@ -306,9 +295,8 @@ export default function ServiceAccountsPage() {
               </Field>
               {credential ? (
                 <Field label="Repetir credencial" htmlFor="account-credential-confirm">
-                  <Input
+                  <PasswordInput
                     id="account-credential-confirm"
-                    type="password"
                     autoComplete="new-password"
                     value={credentialConfirm}
                     onChange={(event) => setCredentialConfirm(event.target.value)}

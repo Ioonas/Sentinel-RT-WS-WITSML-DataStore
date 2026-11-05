@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, Input, PasswordInput } from "@/components/ui";
 import { ApiError, api, type SetupStatus } from "@/lib/api";
 import styles from "../auth.module.css";
 
@@ -169,9 +169,8 @@ export default function LoginPage() {
                 hint="Mínimo 15 caracteres."
                 htmlFor="password"
               >
-                <Input
+                <PasswordInput
                   id="password"
-                  type="password"
                   autoComplete="new-password"
                   required
                   minLength={15}
@@ -196,9 +195,8 @@ export default function LoginPage() {
                 />
               </Field>
               <Field label="Contraseña" htmlFor="password">
-                <Input
+                <PasswordInput
                   id="password"
-                  type="password"
                   autoComplete="current-password"
                   required
                   value={form.password}

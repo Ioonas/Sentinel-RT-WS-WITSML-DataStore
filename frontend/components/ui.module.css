@@ -246,3 +246,52 @@ textarea.input {
     transform: rotate(360deg);
   }
 }
+
+.passwordBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.passwordWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.passwordWrap .input {
+  padding-right: 88px;
+}
+
+.passwordToggle {
+  position: absolute;
+  right: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  background: var(--color-surface-raised);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.passwordToggle:hover {
+  background: var(--color-surface-hover);
+}
+
+.passwordToggle:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.counter {
+  font-size: 0.78rem;
+  color: var(--color-text-faint);
+}
+
+.counterWarn {
+  font-size: 0.78rem;
+  color: var(--color-warn-text);
+}
+

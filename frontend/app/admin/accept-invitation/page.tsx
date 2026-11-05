@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, Input, PasswordInput } from "@/components/ui";
 import { ApiError, api, type UserView } from "@/lib/api";
 import styles from "../auth.module.css";
 
@@ -80,9 +80,8 @@ export default function AcceptInvitationPage() {
               hint="Mínimo 15 caracteres."
               htmlFor="password"
             >
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 autoComplete="new-password"
                 minLength={15}
                 required
