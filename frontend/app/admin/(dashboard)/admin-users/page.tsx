@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
+import { useReauth } from "@/components/Reauth";
 import styles from "../dashboard.module.css";
 
 const HUMAN_ROLES = [
@@ -33,6 +34,7 @@ const HUMAN_ROLES = [
 ];
 
 export default function AdminUsersPage() {
+  const { runWithReauth } = useReauth();
   const users = useApiQuery<UserView[]>("/admin-users");
   const permissions = useApiQuery<PermissionView[]>("/permissions");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -93,15 +95,17 @@ export default function AdminUsersPage() {
     setEditBusy(true);
     setEditError(null);
     try {
-      await api<UserView>(`/admin-users/${selected.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          enabled: editEnabled,
-          role: editRole,
-          display_name: editName,
-          permissions: editRole === "administrador" ? editPermissions : null,
+      await runWithReauth(() =>
+        api<UserView>(`/admin-users/${selected.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            enabled: editEnabled,
+            role: editRole,
+            display_name: editName,
+            permissions: editRole === "administrador" ? editPermissions : null,
+          }),
         }),
-      });
+      );
       users.reload();
     } catch (caught) {
       setEditError(caught instanceof ApiError ? caught.message : "No se pudo actualizar el usuario.");

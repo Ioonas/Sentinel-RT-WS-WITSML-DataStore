@@ -21,6 +21,7 @@ from sentinel.admin_api.schemas import (
     LoginRequest,
     MessageView,
     PasswordChangeRequest,
+    ReauthRequest,
     RecoveryRequest,
     ResetPasswordRequest,
     SessionView,
@@ -119,6 +120,35 @@ async def login(
         correlation_id=correlation,
     )
     return SessionView(user=user_view(user), expires_at=result.expires_at)
+
+
+@router.post("/auth/reauthentication", status_code=status.HTTP_204_NO_CONTENT)
+async def reauthenticate(
+    payload: ReauthRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> Response:
+    """Confirma la contraseña para renovar la ventana de operaciones sensibles."""
+    rate_limit(request, "reauth", limit=10)
+    correlation = correlation_id(request)
+    try:
+        await services.identities.reauthenticate(
+            user_id=auth.principal.id,
+            password=payload.password,
+            token_hash=auth.session.token_hash,
+        )
+    except AuthenticationError:
+        await audit(
+            services,
+            auth,
+            action="auth.reauthentication.failed",
+            correlation=correlation,
+            result=AuditResult.DENIED,
+        )
+        raise
+    await audit(services, auth, action="auth.reauthentication", correlation=correlation)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/auth/sessions", status_code=status.HTTP_204_NO_CONTENT)

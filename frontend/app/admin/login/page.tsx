@@ -7,6 +7,19 @@ import { Alert, Button, Field, Input } from "@/components/ui";
 import { ApiError, api, type SetupStatus } from "@/lib/api";
 import styles from "../auth.module.css";
 
+// Solo se aceptan rutas internas de la administración; cualquier otra cosa va al resumen.
+function requestedNextPath(): string {
+  try {
+    const next = new URLSearchParams(window.location.search).get("next") ?? "";
+    if (next.startsWith("/admin/") && !next.startsWith("//") && !next.includes("\\")) {
+      return next;
+    }
+  } catch {
+    // Sin acceso a la URL (p. ej. entorno sin ventana): se usa la ruta por defecto.
+  }
+  return "/admin/overview";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null);
@@ -19,6 +32,8 @@ export default function LoginPage() {
     contact_phone: "",
     admin_name: "",
     admin_password: "",
+    server_name: "",
+    server_description: "",
   });
 
   useEffect(() => {
@@ -47,6 +62,8 @@ export default function LoginPage() {
             admin_email: form.email,
             admin_name: form.admin_name,
             admin_password: form.admin_password,
+            server_name: form.server_name || undefined,
+            server_description: form.server_description || undefined,
           }),
         });
       } else {
@@ -55,7 +72,7 @@ export default function LoginPage() {
           body: JSON.stringify({ email: form.email, password: form.password }),
         });
       }
-      router.push("/admin/overview");
+      router.push(requestedNextPath());
       router.refresh();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "No se pudo iniciar sesión.");
@@ -86,6 +103,7 @@ export default function LoginPage() {
             <>
               <Alert tone="info">
                 Primer arranque: configure el contacto público y el primer superadministrador.
+                El servidor exige SMTP configurado en su despliegue; si falta o no autentica, el setup se rechaza.
               </Alert>
               <div className={styles.row}>
                 <Field label="Correo de contacto" htmlFor="contact-email">
@@ -103,6 +121,28 @@ export default function LoginPage() {
                     required
                     value={form.contact_phone}
                     onChange={(event) => update("contact_phone", event.target.value)}
+                  />
+                </Field>
+              </div>
+              <div className={styles.row}>
+                <Field
+                  label="Nombre del servicio"
+                  hint="Opcional. Por defecto: Sentinel RT&WS WITSML DataStore."
+                  htmlFor="server-name"
+                >
+                  <Input
+                    id="server-name"
+                    maxLength={255}
+                    value={form.server_name}
+                    onChange={(event) => update("server_name", event.target.value)}
+                  />
+                </Field>
+                <Field label="Descripción del servicio" hint="Opcional." htmlFor="server-description">
+                  <Input
+                    id="server-description"
+                    maxLength={512}
+                    value={form.server_description}
+                    onChange={(event) => update("server_description", event.target.value)}
                   />
                 </Field>
               </div>

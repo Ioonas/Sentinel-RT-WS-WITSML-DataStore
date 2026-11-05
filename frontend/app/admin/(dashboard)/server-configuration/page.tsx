@@ -15,13 +15,39 @@ export default function ServerConfigurationPage() {
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [serviceName, setServiceName] = useState("");
+  const [serviceDescription, setServiceDescription] = useState("");
+  const [serviceFeedback, setServiceFeedback] = useState<string | null>(null);
+  const [serviceError, setServiceError] = useState<string | null>(null);
+  const [serviceBusy, setServiceBusy] = useState(false);
 
   useEffect(() => {
     if (data) {
       setEmail(data.contact_email);
       setPhone(data.contact_phone);
+      setServiceName(data.contact_name);
+      setServiceDescription(data.description);
     }
   }, [data]);
+
+  async function submitServiceInfo(event: FormEvent) {
+    event.preventDefault();
+    setServiceBusy(true);
+    setServiceError(null);
+    setServiceFeedback(null);
+    try {
+      await api<ServerConfigView>("/server-config/service-info", {
+        method: "PUT",
+        body: JSON.stringify({ name: serviceName, description: serviceDescription }),
+      });
+      setServiceFeedback("Nombre y descripción actualizados. GetCap reflejará el cambio.");
+      reload();
+    } catch (caught) {
+      setServiceError(caught instanceof ApiError ? caught.message : "No se pudo guardar.");
+    } finally {
+      setServiceBusy(false);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -70,8 +96,8 @@ export default function ServerConfigurationPage() {
             <Card>
               <Stat
                 label="Borrado en cascada"
-                value={data.cascaded_delete ? "Activo" : "Desactivado"}
-                hint="El spec exige cascadedDelete=false"
+                value={data.cascaded_delete ? "Publicado" : "No publicado"}
+                hint="Cada cuenta de servicio necesita su propio permiso"
               />
             </Card>
             <Card>
@@ -86,7 +112,7 @@ export default function ServerConfigurationPage() {
             <Card>
               <Section
                 title="Contacto público"
-                description="El nombre de contacto y la descripción son de solo lectura en esta versión."
+                description="Correo y teléfono que aparecen en GetCap."
               >
                 {feedback ? <Alert tone="ok">{feedback}</Alert> : null}
                 {saveError ? <Alert>{saveError}</Alert> : null}
@@ -127,7 +153,7 @@ export default function ServerConfigurationPage() {
             <Card>
               <Section title="Detalle">
                 <dl className={styles.detailsGrid}>
-                  <dt>Contacto</dt>
+                  <dt>Nombre del servicio</dt>
                   <dd>{data.contact_name || "—"}</dd>
                   <dt>Descripción</dt>
                   <dd>{data.description || "—"}</dd>
@@ -141,6 +167,42 @@ export default function ServerConfigurationPage() {
               </Section>
             </Card>
           </div>
+
+          <Card>
+            <Section
+              title="Identidad del servicio"
+              description="Nombre y descripción publicados en GetCap. Solo superadministrador; cada cambio queda auditado."
+            >
+              {serviceFeedback ? <Alert tone="ok">{serviceFeedback}</Alert> : null}
+              {serviceError ? <Alert>{serviceError}</Alert> : null}
+              <form className={styles.form} onSubmit={submitServiceInfo}>
+                <Field label="Nombre del servicio" htmlFor="service-name" hint="Entre 3 y 255 caracteres.">
+                  <Input
+                    id="service-name"
+                    required
+                    minLength={3}
+                    maxLength={255}
+                    value={serviceName}
+                    onChange={(event) => setServiceName(event.target.value)}
+                  />
+                </Field>
+                <Field label="Descripción" htmlFor="service-description" hint="Hasta 512 caracteres.">
+                  <Input
+                    id="service-description"
+                    required
+                    maxLength={512}
+                    value={serviceDescription}
+                    onChange={(event) => setServiceDescription(event.target.value)}
+                  />
+                </Field>
+                <div className={styles.actions}>
+                  <Button type="submit" variant="primary" disabled={serviceBusy}>
+                    {serviceBusy ? "Guardando…" : "Guardar identidad"}
+                  </Button>
+                </div>
+              </form>
+            </Section>
+          </Card>
 
           <Card>
             <Section

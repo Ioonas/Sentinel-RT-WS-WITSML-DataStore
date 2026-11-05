@@ -268,6 +268,24 @@ class IdentityService:
             return None
         return user.to_principal(), session
 
+    async def reauthenticate(self, *, user_id: str, password: str, token_hash: str) -> None:
+        """Renueva la ventana de reautenticación de la sesión actual."""
+        user = await self._repo.get_admin_user(user_id)
+        if user is None or not user.enabled:
+            raise AuthenticationError("Credenciales inválidas.")
+        now = self._clock.now()
+        if _is_locked(user.locked_until, now):
+            self._hasher.verify(password, user.password_hash)
+            raise AuthenticationError("Credenciales inválidas.")
+        if not self._hasher.verify(password, user.password_hash):
+            _register_failure(user, now)
+            await self._repo.save_admin_user(user)
+            raise AuthenticationError("Credenciales inválidas.")
+        user.failed_attempts = 0
+        user.locked_until = None
+        await self._repo.save_admin_user(user)
+        await self._repo.update_session_authenticated_at(token_hash, now)
+
     async def logout(self, token: str) -> None:
         if token:
             await self._repo.revoke_session(

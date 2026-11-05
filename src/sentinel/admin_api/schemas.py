@@ -51,6 +51,10 @@ class SetupStatusView(BaseModel):
     setup_completed: bool
 
 
+class ReauthRequest(StrictModel):
+    password: str = Field(min_length=1, max_length=1024)
+
+
 class ServiceInfoUpdateRequest(StrictModel):
     name: str = Field(min_length=3, max_length=255)
     description: str = Field(min_length=1, max_length=512)

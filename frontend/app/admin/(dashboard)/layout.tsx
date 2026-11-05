@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
+import { ReauthProvider } from "@/components/Reauth";
 import { Shell } from "@/components/Shell";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  return <Shell>{children}</Shell>;
+  return (
+    <ReauthProvider>
+      <Shell>{children}</Shell>
+    </ReauthProvider>
+  );
 }

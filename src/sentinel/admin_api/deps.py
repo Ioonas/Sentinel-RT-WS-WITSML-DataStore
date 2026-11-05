@@ -87,12 +87,9 @@ def require_superadmin(auth: AuthContext = Depends(get_auth)) -> AuthContext:
     return auth
 
 
-def require_recent_auth(auth: AuthContext = Depends(get_auth)) -> AuthContext:
-    from datetime import UTC, datetime
-
-    from sentinel.bootstrap.container import Container  # noqa: F401
-
-    now = datetime.now(UTC)
+def require_recent_auth(request: Request, auth: AuthContext = Depends(get_auth)) -> AuthContext:
+    # Mismo reloj que usa el servicio para fijar authenticated_at.
+    now = request.app.state.container.clock.now()
     if now - auth.session.authenticated_at > REAUTH_WINDOW:
         raise ReauthenticationRequired(
             "La operación requiere reautenticación reciente."
