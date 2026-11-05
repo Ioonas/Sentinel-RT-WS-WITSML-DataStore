@@ -9,6 +9,11 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sentinel.identity_access.compromised import (
+    contains_context_term,
+    context_terms,
+    is_common,
+)
 from sentinel.identity_access.domain import (
     ALL_ADMIN_PERMISSIONS,
     AdminPermission,
@@ -287,7 +292,7 @@ class IdentityService:
             raise ValidationError("El correo no tiene un formato válido.")
         if await self._repo.get_admin_user_by_email(normalized) is not None:
             raise ConflictError("Ya existe un usuario administrativo con ese correo.")
-        self._validate_password(password)
+        self._validate_password(password, context=context_terms(normalized, display_name))
         delegated = self._validate_delegated_permissions(role, permissions)
         user = AdminUserRecord(
             id=self._ids.new_uid(),
@@ -339,7 +344,7 @@ class IdentityService:
             raise NotFoundError("Usuario no encontrado.")
         if not self._hasher.verify(current_password, user.password_hash):
             raise AuthenticationError("La contraseña actual no es válida.")
-        self._validate_password(new_password)
+        self._validate_password(new_password, context=context_terms(user.email, user.display_name))
         user.password_hash = self._hasher.hash(new_password)
         user.must_change_password = False
         await self._repo.save_admin_user(user)
@@ -388,7 +393,7 @@ class IdentityService:
             or invitation.expires_at <= now
         ):
             raise ValidationError("La invitación no es válida o ha expirado.")
-        self._validate_password(password)
+        self._validate_password(password, context=context_terms(invitation.email, display_name))
         if await self._repo.get_admin_user_by_email(invitation.email) is not None:
             raise ConflictError("Ya existe un usuario con ese correo.")
         user = AdminUserRecord(
@@ -444,7 +449,7 @@ class IdentityService:
         user = await self._repo.get_admin_user(reset.user_id)
         if user is None:
             raise ValidationError("El enlace de recuperación no es válido o expiró.")
-        self._validate_password(new_password)
+        self._validate_password(new_password, context=context_terms(user.email, user.display_name))
         user.password_hash = self._hasher.hash(new_password)
         user.must_change_password = False
         await self._repo.save_admin_user(user)
@@ -457,13 +462,19 @@ class IdentityService:
     def _new_secret(self) -> str:
         return f"srtws_{self._ids.new_token(32)}"
 
-    def _validate_password(self, password: str) -> None:
-        if len(password) < 12:
-            raise ValidationError("La contraseña debe tener al menos 12 caracteres.")
-        if password.lower() == password or password.upper() == password:
-            raise ValidationError("La contraseña debe combinar mayúsculas y minúsculas.")
+    def _validate_password(self, password: str, *, context: frozenset[str] = frozenset()) -> None:
+        if len(password) < 15:
+            raise ValidationError("La contraseña debe tener al menos 15 caracteres.")
         if not any(ch.isdigit() for ch in password):
             raise ValidationError("La contraseña debe incluir al menos un dígito.")
+        if is_common(password):
+            raise ValidationError(
+                "La contraseña es demasiado común o aparece en brechas conocidas."
+            )
+        if contains_context_term(password, context):
+            raise ValidationError(
+                "La contraseña no puede contener datos de la cuenta ni del producto."
+            )
 
     def _validate_grants(self, role: ServiceRole, grants: list[Grant]) -> None:
         if not grants:

@@ -61,7 +61,7 @@ class SetupRequest(StrictModel):
     contact_phone: str = Field(min_length=6, max_length=32)
     admin_email: str = Field(min_length=3, max_length=255)
     admin_name: str = Field(min_length=1, max_length=255)
-    admin_password: str = Field(min_length=12, max_length=1024)
+    admin_password: str = Field(min_length=15, max_length=1024)
     server_name: str | None = Field(default=None, min_length=3, max_length=255)
     server_description: str | None = Field(default=None, min_length=1, max_length=512)
 
@@ -153,7 +153,7 @@ class InvitationView(BaseModel):
 
 class AcceptInvitationRequest(StrictModel):
     token: str = Field(min_length=10, max_length=512)
-    password: str = Field(min_length=12, max_length=1024)
+    password: str = Field(min_length=15, max_length=1024)
     display_name: str | None = Field(default=None, max_length=255)
 
 
@@ -170,12 +170,12 @@ class RecoveryRequest(StrictModel):
 
 class ResetPasswordRequest(StrictModel):
     token: str = Field(min_length=10, max_length=512)
-    new_password: str = Field(min_length=12, max_length=1024)
+    new_password: str = Field(min_length=15, max_length=1024)
 
 
 class PasswordChangeRequest(StrictModel):
     current_password: str = Field(min_length=1, max_length=1024)
-    new_password: str = Field(min_length=12, max_length=1024)
+    new_password: str = Field(min_length=15, max_length=1024)
 
 
 class RoleView(BaseModel):

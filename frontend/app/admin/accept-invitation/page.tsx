@@ -77,14 +77,14 @@ export default function AcceptInvitationPage() {
             </Field>
             <Field
               label="Contraseña inicial"
-              hint="Mínimo 12 caracteres, con mayúsculas, minúsculas y dígitos."
+              hint="Mínimo 15 caracteres, con al menos un dígito."
               htmlFor="password"
             >
               <Input
                 id="password"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={15}
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

@@ -137,14 +137,14 @@ export default function ProfilePage() {
                 </Field>
                 <Field
                   label="Nueva contraseña"
-                  hint="Mínimo 12 caracteres, con mayúsculas, minúsculas y dígitos."
+                  hint="Mínimo 15 caracteres, con al menos un dígito."
                   htmlFor="new-password"
                 >
                   <Input
                     id="new-password"
                     type="password"
                     autoComplete="new-password"
-                    minLength={12}
+                    minLength={15}
                     required
                     value={newPassword}
                     onChange={(event) => setNewPassword(event.target.value)}
@@ -155,7 +155,7 @@ export default function ProfilePage() {
                     id="confirm-password"
                     type="password"
                     autoComplete="new-password"
-                    minLength={12}
+                    minLength={15}
                     required
                     value={confirmPassword}
                     onChange={(event) => setConfirmPassword(event.target.value)}

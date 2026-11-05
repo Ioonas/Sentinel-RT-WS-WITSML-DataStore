@@ -19,7 +19,7 @@ TEST_DSN = os.getenv(
     "postgresql+asyncpg://sentinel_test:sentinel_test@localhost:5432/sentinel_test",
 )
 
-ADMIN_PASSWORD = "Sentinel-Dev-2026"
+ADMIN_PASSWORD = "Clave-Operativa-2026"
 CONTACT = {"contact_email": "ops@example.com", "contact_phone": "+1 555 0100"}
 
 
