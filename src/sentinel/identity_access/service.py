@@ -44,6 +44,21 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 SESSION_TTL = timedelta(hours=12)
 REAUTH_WINDOW = timedelta(minutes=15)
+# Bloqueo por cuenta: tras MAX_FAILED_ATTEMPTS contraseñas incorrectas seguidas,
+# la cuenta no acepta intentos durante LOCKOUT_DURATION.
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION = timedelta(minutes=15)
+
+
+def _is_locked(locked_until: datetime | None, now: datetime) -> bool:
+    return locked_until is not None and locked_until > now
+
+
+def _register_failure(record, now: datetime) -> None:
+    record.failed_attempts += 1
+    if record.failed_attempts >= MAX_FAILED_ATTEMPTS:
+        record.locked_until = now + LOCKOUT_DURATION
+        record.failed_attempts = 0
 INVITATION_TTL = timedelta(hours=72)
 
 
@@ -81,9 +96,18 @@ class IdentityService:
             # Verificación ficticia para no filtrar por tiempo si la cuenta no existe.
             self._hasher.verify(secret, "$argon2id$v=19$m=65536,t=3,p=2$aaaaaaaaaaaaaaaa$")
             return None
-        if not self._hasher.verify(secret, account.credential_hash):
+        now = self._clock.now()
+        if _is_locked(account.locked_until, now):
+            # Mismo coste que un intento real para no revelar el estado del bloqueo.
+            self._hasher.verify(secret, account.credential_hash)
             return None
-        account.last_used_at = self._clock.now()
+        if not self._hasher.verify(secret, account.credential_hash):
+            _register_failure(account, now)
+            await self._repo.save_service_account(account)
+            return None
+        account.failed_attempts = 0
+        account.locked_until = None
+        account.last_used_at = now
         await self._repo.save_service_account(account)
         return account.to_principal()
 
@@ -178,11 +202,18 @@ class IdentityService:
         if user is None or not user.enabled:
             # Mensaje genérico: no se revela si la cuenta existe o está deshabilitada.
             raise AuthenticationError("Credenciales inválidas.")
-        if not self._hasher.verify(password, user.password_hash):
+        now = self._clock.now()
+        if _is_locked(user.locked_until, now):
+            self._hasher.verify(password, user.password_hash)
             raise AuthenticationError("Credenciales inválidas.")
+        if not self._hasher.verify(password, user.password_hash):
+            _register_failure(user, now)
+            await self._repo.save_admin_user(user)
+            raise AuthenticationError("Credenciales inválidas.")
+        user.failed_attempts = 0
+        user.locked_until = None
         if self._hasher.needs_rehash(user.password_hash):
             user.password_hash = self._hasher.hash(password)
-        now = self._clock.now()
         user.last_login_at = now
         await self._repo.save_admin_user(user)
 

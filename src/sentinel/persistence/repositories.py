@@ -1105,6 +1105,8 @@ class SqlAlchemyIdentityRepository:
         row.created_at = account.created_at
         row.rotated_at = account.rotated_at
         row.last_used_at = account.last_used_at
+        row.failed_attempts = account.failed_attempts
+        row.locked_until = account.locked_until
         await self._session.flush()
 
     async def delete_service_account(self, account_id: str) -> None:
@@ -1140,6 +1142,8 @@ class SqlAlchemyIdentityRepository:
         row.must_change_password = user.must_change_password
         row.created_at = user.created_at
         row.last_login_at = user.last_login_at
+        row.failed_attempts = user.failed_attempts
+        row.locked_until = user.locked_until
         await self._session.flush()
 
     async def count_admin_users(self) -> int:
@@ -1287,6 +1291,8 @@ class SqlAlchemyIdentityRepository:
             created_at=row.created_at,
             last_used_at=row.last_used_at,
             rotated_at=row.rotated_at,
+            failed_attempts=row.failed_attempts,
+            locked_until=row.locked_until,
         )
 
     @staticmethod
@@ -1302,6 +1308,8 @@ class SqlAlchemyIdentityRepository:
             must_change_password=row.must_change_password,
             created_at=row.created_at,
             last_login_at=row.last_login_at,
+            failed_attempts=row.failed_attempts,
+            locked_until=row.locked_until,
         )
 
 

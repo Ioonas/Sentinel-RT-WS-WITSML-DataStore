@@ -31,6 +31,8 @@ class ServiceAccountRecord:
     created_at: datetime | None = None
     last_used_at: datetime | None = None
     rotated_at: datetime | None = None
+    failed_attempts: int = 0
+    locked_until: datetime | None = None
 
     def to_principal(self) -> Principal:
         return Principal(
@@ -55,6 +57,8 @@ class AdminUserRecord:
     must_change_password: bool = False
     created_at: datetime | None = None
     last_login_at: datetime | None = None
+    failed_attempts: int = 0
+    locked_until: datetime | None = None
 
     def to_principal(self) -> Principal:
         return Principal(
