@@ -421,8 +421,6 @@ class IdentityService:
     def _validate_password(self, password: str, *, context: frozenset[str] = frozenset()) -> None:
         if len(password) < 15:
             raise ValidationError("La contraseña debe tener al menos 15 caracteres.")
-        if password.lower() == password or password.upper() == password:
-            raise ValidationError("La contraseña debe combinar mayúsculas y minúsculas.")
         if not any(ch.isdigit() for ch in password):
             raise ValidationError("La contraseña debe incluir al menos un dígito.")
         if is_common(password):
