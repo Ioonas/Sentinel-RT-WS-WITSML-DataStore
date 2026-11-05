@@ -130,16 +130,24 @@ class UomValidator:
     def available(self) -> bool:
         return self._unit_dictionary_path().is_file()
 
-    def validate(self, document: etree._Element) -> None:
+    def validate(
+        self, document: etree._Element, *, code: WmlsCode = WmlsCode.ERROR_ADDING
+    ) -> None:
         """Valida todos los ``uom`` de ``document``.
 
         Devuelve ``-443`` si un valor no está en el diccionario y ``-453`` si
         una medida no declara ``uom``. La primera violación encontrada en el
         recorrido determina el código, igual que hace el XSD con el primer
         error de esquema.
+
+        Falla cerrado: si el diccionario no está disponible, la operación se
+        rechaza con ``code`` en lugar de aceptar datos sin validar.
         """
         if not self.available:
-            return
+            raise WitsmlError(
+                code,
+                "No se puede validar uom: falta witsmlUnitDict.xml en el servidor.",
+            )
         annotations = self._load_annotations()
         index = self._load_index()
         root_name = etree.QName(document).localname

@@ -874,7 +874,7 @@ class WitsmlStoreService:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
         root = parse_xml(xml_in)
         xd.ensure_namespace(root)
-        self._uom.validate(root)
+        self._uom.validate(root, code=WmlsCode.ERROR_ADDING)
         self._validator.validate_document(object_type, root, operation="write")
         spec = spec_for(object_type)
         elements = [item for item in root if xd.localname(item) == spec.name]
@@ -1103,7 +1103,7 @@ class WitsmlStoreService:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
         root = parse_xml(xml_in)
         xd.ensure_namespace(root)
-        self._uom.validate(root)
+        self._uom.validate(root, code=WmlsCode.ERROR_UPDATING)
         self._validator.validate_document(object_type, root, operation="update")
         spec = spec_for(object_type)
         elements = [item for item in root if xd.localname(item) == spec.name]

@@ -8,6 +8,7 @@ import pytest
 
 from sentinel.audit_config.domain import ServerConfig
 from sentinel.shared.errors import ValidationError
+from sentinel.witsml_application.domain.codes import WmlsCode
 from sentinel.witsml_application.domain.errors import WitsmlError
 from sentinel.witsml_application.domain.uom import UomValidator
 from sentinel.xml_schema import documents as xd
@@ -185,3 +186,15 @@ def test_build_log_data_emits_one_data_element_per_row() -> None:
         "1,2",
         "3,4",
     ]
+
+
+def test_uom_validator_fails_closed_without_dictionary(tmp_path) -> None:
+    """Sin witsmlUnitDict.xml la validación rechaza la operación; no la omite."""
+    from lxml import etree
+
+    validator = UomValidator(tmp_path)
+    assert validator.available is False
+    root = etree.fromstring(f'<wells xmlns="{WITSML_NS}"/>')
+    with pytest.raises(WitsmlError) as raised:
+        validator.validate(root, code=WmlsCode.ERROR_UPDATING)
+    assert raised.value.wmls_code == int(WmlsCode.ERROR_UPDATING)
