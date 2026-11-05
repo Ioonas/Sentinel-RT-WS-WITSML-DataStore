@@ -121,6 +121,15 @@ export type ServiceAccountView = {
 
 export type CredentialView = { secret: string; message: string };
 
+export type InvitationSummaryView = {
+  id: string;
+  email: string;
+  role: string;
+  created_by: string;
+  created_at: string | null;
+  expires_at: string;
+};
+
 export type InvitationView = {
   id: string;
   email: string;

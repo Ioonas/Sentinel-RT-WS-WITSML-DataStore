@@ -428,6 +428,9 @@ class IdentityService:
         await self._repo.mark_invitation_accepted(invitation.id, now)
         return user
 
+    async def list_pending_invitations(self) -> list[InvitationRecord]:
+        return await self._repo.list_pending_invitations(self._clock.now())
+
     async def list_admin_users(self) -> list[AdminUserRecord]:
         return await self._repo.list_admin_users()
 

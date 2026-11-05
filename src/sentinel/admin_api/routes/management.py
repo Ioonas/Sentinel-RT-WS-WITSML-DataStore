@@ -28,6 +28,7 @@ from sentinel.admin_api.schemas import (
     GrantIn,
     GrantView,
     InvitationCreate,
+    InvitationSummaryView,
     InvitationView,
     MessageView,
     PermissionView,
@@ -367,6 +368,25 @@ async def update_admin_user(
         details={"enabled": user.enabled, "role": user.role.value},
     )
     return user_view(user)
+
+
+@router.get("/invitations", response_model=list[InvitationSummaryView])
+async def list_invitations(
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    services: RequestServices = Depends(get_services),
+) -> list[InvitationSummaryView]:
+    pending = await services.identities.list_pending_invitations()
+    return [
+        InvitationSummaryView(
+            id=item.id,
+            email=item.email,
+            role=item.role.value,
+            created_by=item.created_by,
+            created_at=item.created_at,
+            expires_at=item.expires_at,
+        )
+        for item in pending
+    ]
 
 
 @router.post(

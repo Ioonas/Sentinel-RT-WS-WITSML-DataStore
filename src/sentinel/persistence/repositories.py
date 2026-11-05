@@ -1237,6 +1237,27 @@ class SqlAlchemyIdentityRepository:
             created_at=row.created_at,
         )
 
+    async def list_pending_invitations(self, now: datetime) -> list[InvitationRecord]:
+        rows = await self._session.scalars(
+            select(InvitationRow)
+            .where(InvitationRow.accepted_at.is_(None), InvitationRow.expires_at > now)
+            .order_by(InvitationRow.created_at.desc())
+        )
+        return [
+            InvitationRecord(
+                id=row.id,
+                email=row.email,
+                role=HumanRole(row.role),
+                token_hash=row.token_hash,
+                expires_at=row.expires_at,
+                created_by=row.created_by,
+                permissions=frozenset(row.permissions or ()),
+                accepted_at=row.accepted_at,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
     async def mark_invitation_accepted(
         self, invitation_id: str, accepted_at: datetime
     ) -> None:
