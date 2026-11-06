@@ -67,3 +67,32 @@ async def test_scoped_writer_creates_well_and_owns_it(admin_client: AsyncClient,
     )
     account = next(item for item in listed.json() if item["name"] == "escritor.sin.pozos")
     assert account["well_scope"] == ["w-1"]
+
+
+async def test_quitar_todos_los_pozos_se_guarda(admin_client: AsyncClient, csrf: str) -> None:
+    """Pasar de "todos los pozos" (null) a ninguno ([]) debe persistir tras recargar."""
+    created = await admin_client.post(
+        "/admin-api/v1/service-accounts",
+        headers={"x-csrf-token": csrf},
+        json={
+            "name": "lector.todos",
+            "role": "reader",
+            "grants": [{"object_type": "*", "action": "read"}],
+            "well_scope": None,
+        },
+    )
+    assert created.status_code == 201, created.text
+    account_id = created.json()["id"]
+
+    patched = await admin_client.patch(
+        f"/admin-api/v1/service-accounts/{account_id}",
+        headers={"x-csrf-token": csrf},
+        json={"well_scope": []},
+    )
+    assert patched.status_code == 200, patched.text
+
+    listed = await admin_client.get(
+        "/admin-api/v1/service-accounts", headers={"x-csrf-token": csrf}
+    )
+    account = next(item for item in listed.json() if item["id"] == account_id)
+    assert account["well_scope"] == []

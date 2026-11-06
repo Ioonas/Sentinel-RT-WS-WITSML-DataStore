@@ -1102,7 +1102,7 @@ class SqlAlchemyIdentityRepository:
         row.enabled = account.enabled
         row.credential_hash = account.credential_hash
         row.grants = [grant.to_dict() for grant in account.grants]
-        row.well_scope = sorted(account.well_scope) if account.well_scope else None
+        row.well_scope = sorted(account.well_scope) if account.well_scope is not None else None
         row.created_at = account.created_at
         row.rotated_at = account.rotated_at
         row.last_used_at = account.last_used_at
@@ -1377,7 +1377,7 @@ class SqlAlchemyIdentityRepository:
                 )
                 for grant in (row.grants or ())
             ),
-            well_scope=frozenset(row.well_scope) if row.well_scope else None,
+            well_scope=frozenset(row.well_scope) if row.well_scope is not None else None,
             created_at=row.created_at,
             last_used_at=row.last_used_at,
             rotated_at=row.rotated_at,
