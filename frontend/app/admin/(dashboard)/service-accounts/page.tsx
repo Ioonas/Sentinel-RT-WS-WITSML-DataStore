@@ -53,6 +53,7 @@ export default function ServiceAccountsPage() {
     { object_type: "*", action: "read", uid_well: null },
   ]);
   const [selectedWells, setSelectedWells] = useState<string[]>([]);
+  const [allWells, setAllWells] = useState(false);
   const [cascade, setCascade] = useState(false);
   const [replacesId, setReplacesId] = useState("");
   const [credential, setCredential] = useState("");
@@ -95,7 +96,8 @@ export default function ServiceAccountsPage() {
             name,
             role,
             grants,
-            well_scope: selectedWells.length > 0 ? selectedWells : null,
+            // null = todos los pozos; lista vacía = ningún pozo (valor por defecto).
+            well_scope: allWells ? null : selectedWells,
             can_cascade_delete: cascade,
             replaces_account_id: replacesId || null,
             replacement_grace_days: replacesId ? Number(graceDays) : undefined,
@@ -106,6 +108,7 @@ export default function ServiceAccountsPage() {
       setCreated(result);
       setName("");
       setSelectedWells([]);
+      setAllWells(false);
       setCascade(false);
       setReplacesId("");
       setGraceDays("7");
@@ -527,7 +530,18 @@ export default function ServiceAccountsPage() {
                 <span className={styles.groupLabel}>Permisos</span>
                 <GrantEditor grants={grants} onChange={setGrants} />
               </div>
-              <WellPicker value={selectedWells} onChange={setSelectedWells} />
+              <div>
+                <label className={styles.groupLabel}>
+                  <input type="checkbox" checked={allWells} onChange={(event) => setAllWells(event.target.checked)} />{" "}
+                  Acceso a todos los pozos
+                </label>
+                <p className={styles.faint}>
+                  {allWells
+                    ? "La cuenta ve todos los pozos, incluidos los que se creen después."
+                    : "Sin pozos seleccionados, la cuenta no ve datos. Puede crear pozos nuevos si tiene escritura global, y cada uno queda dentro de su alcance."}
+                </p>
+                {allWells ? null : <WellPicker value={selectedWells} onChange={setSelectedWells} />}
+              </div>
               <details className={styles.advanced}>
                 <summary>Opciones avanzadas</summary>
                 <div className={styles.form}>

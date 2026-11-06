@@ -102,6 +102,7 @@ class Container:
                 ids=self.ids,
                 validator=self.validator,
                 uom=self.uom,
+                well_scope_recorder=identities,
             )
             inventory = InventoryService(
                 wells=repos.wells,

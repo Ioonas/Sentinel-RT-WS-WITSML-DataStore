@@ -2,6 +2,7 @@
 
 import { permissionLabel } from "@/lib/permissions";
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import {
   Alert,
   Button,
@@ -60,6 +61,7 @@ export default function AdminUsersPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("auditor");
   const [invitePermissions, setInvitePermissions] = useState<string[]>([]);
+  const [accountKind, setAccountKind] = useState<"persona" | "servicio">("persona");
   const [invitation, setInvitation] = useState<InvitationView | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -371,7 +373,49 @@ export default function AdminUsersPage() {
         </Card>
 
         <Card>
-          <Section title="Invitar usuario" description="El enlace de invitación vence automáticamente.">
+          <Section
+            title="Nueva cuenta"
+            description={
+              accountKind === "persona"
+                ? "Se envía una invitación por correo. El enlace vence automáticamente."
+                : "Las cuentas de servicio las usan programas, no personas."
+            }
+          >
+            <fieldset className={styles.form} style={{ border: 0, padding: 0, margin: 0 }}>
+              <legend className={styles.groupLabel}>Tipo de cuenta</legend>
+              <label className={styles.faint} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="radio"
+                  name="account-kind"
+                  checked={accountKind === "persona"}
+                  onChange={() => setAccountKind("persona")}
+                />
+                Persona (entra a la aplicación web)
+              </label>
+              <label className={styles.faint} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="radio"
+                  name="account-kind"
+                  checked={accountKind === "servicio"}
+                  onChange={() => setAccountKind("servicio")}
+                />
+                Cuenta de servicio (usa un programa)
+              </label>
+            </fieldset>
+            {accountKind === "servicio" ? (
+              <div className={styles.form}>
+                <p className={styles.faint}>
+                  Se crean en su propia pantalla, donde se define el acceso y la credencial.
+                </p>
+                <div className={styles.actions}>
+                  <Link href="/admin/service-accounts" className={styles.quickLink}>
+                    Ir a cuentas de servicio
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+            {accountKind === "persona" ? (
+            <>
             {inviteError ? <Alert>{inviteError}</Alert> : null}
             <form className={styles.form} onSubmit={invite}>
               <Field label="Correo" htmlFor="invite-email">
@@ -410,6 +454,8 @@ export default function AdminUsersPage() {
                 {inviteBusy ? "Invitando…" : "Crear invitación"}
               </Button>
             </form>
+            </>
+            ) : null}
           </Section>
         </Card>
       </div>

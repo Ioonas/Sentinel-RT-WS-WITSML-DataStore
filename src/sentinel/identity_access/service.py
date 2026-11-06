@@ -171,7 +171,8 @@ class IdentityService:
             enabled=True,
             credential_hash=self._hasher.hash(secret),
             grants=tuple(grants),
-            well_scope=frozenset(well_scope) if well_scope else None,
+            # None = sin restricción (todos los pozos); un conjunto vacío = ningún pozo.
+            well_scope=frozenset(well_scope) if well_scope is not None else None,
             created_at=now,
             rotated_at=now,
             can_cascade_delete=can_cascade_delete,
@@ -204,11 +205,19 @@ class IdentityService:
         account.role = effective_role
         account.grants = effective_grants
         if well_scope is not None:
-            account.well_scope = frozenset(well_scope) or None
+            account.well_scope = frozenset(well_scope)
         if enabled is not None:
             account.enabled = enabled
         await self._repo.save_service_account(account)
         return account
+
+    async def add_well_to_scope(self, account_id: str, uid: str) -> None:
+        """Incorpora al alcance de la cuenta un pozo que ella misma acaba de crear."""
+        account = await self._repo.get_service_account(account_id)
+        if account is None or account.well_scope is None:
+            return
+        account.well_scope = account.well_scope | {uid}
+        await self._repo.save_service_account(account)
 
     async def rotate_credential(
         self, account_id: str, *, credential: str | None = None

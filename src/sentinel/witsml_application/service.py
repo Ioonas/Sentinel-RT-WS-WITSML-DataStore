@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from xml.sax.saxutils import escape
 
 from lxml import etree
@@ -61,6 +61,12 @@ from sentinel.xml_schema.serializer import (
 _HEADER_SAMPLE_LIMIT = 1000
 
 
+class WellScopeRecorder(Protocol):
+    """Registra en el alcance de una cuenta de servicio un pozo recién creado por ella."""
+
+    async def add_well_to_scope(self, account_id: str, uid: str) -> None: ...
+
+
 class WitsmlStoreService:
     def __init__(
         self,
@@ -77,7 +83,9 @@ class WitsmlStoreService:
         ids: IdGenerator,
         validator: SchemaValidatorPort,
         uom: UomValidator | None = None,
+        well_scope_recorder: WellScopeRecorder | None = None,
     ) -> None:
+        self._scope_recorder = well_scope_recorder
         self._wells = wells
         self._wellbores = wellbores
         self._logs = logs
@@ -926,8 +934,11 @@ class WitsmlStoreService:
             if object_type == "well":
                 uid_well = xd.attr(element, "uid")
             # Con principal None (alta administrativa) el permiso admin ya autorizó.
-            if principal is not None and not principal.allows_witsml(
-                WitsmlAction.WRITE, object_type, uid_well
+            # Un pozo nuevo no está todavía en el alcance de la cuenta, así que se
+            # autoriza por escritura global sobre pozos (ver Principal.allows_create_well).
+            if principal is not None and not (
+                principal.allows_witsml(WitsmlAction.WRITE, object_type, uid_well)
+                or (object_type == "well" and principal.allows_create_well())
             ):
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
 
@@ -958,6 +969,14 @@ class WitsmlStoreService:
                 )
                 await self._ensure_unique(self._wells, uid, None)
                 await self._wells.add(record)  # type: ignore[arg-type]
+                if (
+                    principal is not None
+                    and principal.well_scope is not None
+                    and self._scope_recorder is not None
+                ):
+                    # Cuenta acotada: el pozo que crea queda dentro de su alcance.
+                    # Misma sesión de base de datos, así que se confirma con la operación.
+                    await self._scope_recorder.add_well_to_scope(principal.id, uid)
             elif object_type == "wellbore":
                 await self._require_parent("well", uid_well or "")
                 xml = serialize(element)

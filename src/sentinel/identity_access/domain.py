@@ -148,6 +148,21 @@ class Principal:
             for grant in self.grants
         )
 
+    def allows_create_well(self) -> bool:
+        """Crear un pozo nuevo requiere escritura global sobre pozos, no acotada.
+
+        El pozo aún no existe, así que no puede estar dentro del alcance de la cuenta;
+        por eso no se usa ``allows_witsml`` para esta comprobación.
+        """
+        if self.is_superadmin or self.is_system:
+            return True
+        return any(
+            grant.action == WitsmlAction.WRITE
+            and grant.object_type in ("*", "well")
+            and grant.uid_well is None
+            for grant in self.grants
+        )
+
     @property
     def readable_wells(self) -> frozenset[str] | None:
         """Pozos que el actor puede leer; ``None`` significa sin restricción."""
