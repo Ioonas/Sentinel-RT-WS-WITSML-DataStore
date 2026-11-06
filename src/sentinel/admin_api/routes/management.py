@@ -81,7 +81,8 @@ def _account_view(account: ServiceAccountRecord) -> ServiceAccountView:
         role=account.role.value,
         enabled=account.enabled,
         grants=[_grant_view(grant) for grant in account.grants],
-        well_scope=sorted(account.well_scope) if account.well_scope else None,
+        # None = todos los pozos; lista vacía = solo los pozos que la cuenta crea.
+        well_scope=sorted(account.well_scope) if account.well_scope is not None else None,
         created_at=account.created_at,
         last_used_at=account.last_used_at,
         rotated_at=account.rotated_at,
@@ -235,7 +236,8 @@ async def create_service_account(
         name=payload.name,
         role=payload.role,
         grants=[_grant_model(grant) for grant in payload.grants],
-        well_scope=set(payload.well_scope) if payload.well_scope else None,
+        # Lista vacía NO significa todos los pozos: solo null lo significa.
+        well_scope=set(payload.well_scope) if payload.well_scope is not None else None,
         can_cascade_delete=payload.can_cascade_delete,
         replaces=replaces,
         replacement_grace=timedelta(days=payload.replacement_grace_days),

@@ -24,6 +24,14 @@ async def _create_account(
     return response.json()["id"]
 
 
+async def test_empty_scope_is_not_all_wells(admin_client: AsyncClient, csrf: str) -> None:
+    """Una lista vacía de pozos no debe guardarse como acceso a todos los pozos."""
+    account_id = await _create_account(admin_client, csrf, "lector.vacio", [])
+    listed = await admin_client.get("/admin-api/v1/service-accounts")
+    account = next(item for item in listed.json() if item["id"] == account_id)
+    assert account["well_scope"] == []
+
+
 async def test_web_access_requires_a_scoped_account(admin_client: AsyncClient, csrf: str) -> None:
     open_account = await _create_account(admin_client, csrf, "lector.todos", None)
     rejected = await admin_client.post(

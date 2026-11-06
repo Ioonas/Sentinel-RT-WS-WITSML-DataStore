@@ -676,7 +676,11 @@ export default function ServiceAccountsPage() {
                             <Tags values={account.grants.map(grantLabel)} />
                           </td>
                           <td>
-                            <Tags values={account.well_scope ?? []} />
+                            {account.well_scope === null ? (
+                              <span className={styles.faint}>Todos los pozos</span>
+                            ) : (
+                              <Tags values={account.well_scope} />
+                            )}
                           </td>
                           <td>
                             <div className={styles.stack}>
