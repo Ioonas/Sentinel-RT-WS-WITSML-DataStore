@@ -38,6 +38,11 @@ const HUMAN_ROLES = [
   { value: "administrador_seguridad", label: "Administrador de seguridad" },
 ];
 
+/** Nombre visible de un rol; si el valor no está en el catálogo se muestra tal cual. */
+function roleLabel(value: string) {
+  return HUMAN_ROLES.find((item) => item.value === value)?.label ?? value;
+}
+
 type ConfirmRequest = {
   title: string;
   description: string;
@@ -338,7 +343,7 @@ export default function AdminUsersPage() {
                             ) : null}
                           </td>
                           <td className={styles.wrap}>{user.email}</td>
-                          <td>{user.role}</td>
+                          <td>{roleLabel(user.role)}</td>
                           <td>
                             <StatusBadge
                               status={user.enabled ? "ok" : "danger"}
@@ -391,7 +396,7 @@ export default function AdminUsersPage() {
               </Field>
               {inviteRole === "administrador" ? (
                 <div>
-                  <span className={styles.statLabel}>Permisos delegados</span>
+                  <span className={styles.groupLabel}>Permisos delegados</span>
                   <PermissionChecks
                     options={permissionNames}
                     selected={invitePermissions}
@@ -443,7 +448,7 @@ export default function AdminUsersPage() {
                       return (
                         <tr key={item.id}>
                           <td className={styles.wrap}>{item.email}</td>
-                          <td>{item.role}</td>
+                          <td>{roleLabel(item.role)}</td>
                           <td>
                             <StatusBadge
                               status={expired ? "danger" : "neutral"}
@@ -467,7 +472,7 @@ export default function AdminUsersPage() {
                                 onClick={() => askCancelInvitation(item)}
                                 disabled={actingInvitationId !== null}
                               >
-                                Cancelar
+                                Cancelar invitación
                               </Button>
                             </div>
                           </td>
@@ -531,12 +536,12 @@ export default function AdminUsersPage() {
                 </Field>
               </div>
               <div>
-                <span className={styles.statLabel}>Permisos efectivos</span>
+                <span className={styles.groupLabel}>Permisos efectivos</span>
                 <Tags values={selected.permissions.map(permissionLabel)} />
               </div>
               {editRole === "administrador" ? (
                 <div>
-                  <span className={styles.statLabel}>Permisos delegados</span>
+                  <span className={styles.groupLabel}>Permisos delegados</span>
                   <PermissionChecks
                     options={permissionNames}
                     selected={editPermissions}
