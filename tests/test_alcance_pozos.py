@@ -59,6 +59,7 @@ async def test_scoped_writer_creates_well_and_owns_it(admin_client: AsyncClient,
         "WMLS_AddToStore",
         secret,
         {"WMLtypeIn": "well", "XMLin": WELL, "OptionsIn": ""},
+        username="escritor.sin.pozos",
     )
     assert added.status_code == 200, added.text
 
@@ -82,7 +83,7 @@ async def test_quitar_todos_los_pozos_se_guarda(admin_client: AsyncClient, csrf:
         },
     )
     assert created.status_code == 201, created.text
-    account_id = created.json()["id"]
+    account_id = created.json()["account"]["id"]
 
     patched = await admin_client.patch(
         f"/admin-api/v1/service-accounts/{account_id}",

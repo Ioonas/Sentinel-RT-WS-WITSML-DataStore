@@ -21,7 +21,7 @@ async def _create_account(
         json=body,
     )
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    return response.json()["account"]["id"]
 
 
 async def test_empty_scope_is_not_all_wells(admin_client: AsyncClient, csrf: str) -> None:

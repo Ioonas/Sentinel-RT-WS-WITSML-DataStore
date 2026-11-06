@@ -57,7 +57,7 @@ async def test_pending_invitations_are_listed_without_secrets_and_expire(clock_c
     assert set(items[0]) == {"id", "email", "role", "created_by", "created_at", "expires_at"}
     assert "token" not in listed.text and "token_hash" not in listed.text
 
-    # Una invitación vencida deja de aparecer como pendiente.
+    # Una invitación vencida sigue listada para que el administrador pueda reenviarla.
     # La sesión caduca antes que la invitación (12 h frente a 72 h): se vuelve a iniciar sesión.
     clock.advance(timedelta(hours=73).total_seconds())
     login = await client.post(
@@ -65,4 +65,7 @@ async def test_pending_invitations_are_listed_without_secrets_and_expire(clock_c
         json={"email": "admin@example.com", "password": ADMIN_PASSWORD},
     )
     assert login.status_code in (200, 201), login.text
-    assert (await client.get("/admin-api/v1/invitations")).json() == []
+    expired = (await client.get("/admin-api/v1/invitations")).json()
+    assert [item["email"] for item in expired] == ["invitado@example.com"]
+    expires_at = datetime.fromisoformat(expired[0]["expires_at"].replace("Z", "+00:00"))
+    assert expires_at <= datetime.fromtimestamp(clock.now().timestamp(), UTC)

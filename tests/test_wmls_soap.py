@@ -55,8 +55,9 @@ async def soap(
     operation: str,
     secret: str,
     parameters: dict[str, str] | None = None,
+    username: str = "acme.writer",
 ):
-    credentials = base64.b64encode(f"acme.writer:{secret}".encode()).decode()
+    credentials = base64.b64encode(f"{username}:{secret}".encode()).decode()
     return await client.post(
         "/witsml",
         content=envelope(operation, parameters),
