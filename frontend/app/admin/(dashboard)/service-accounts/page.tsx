@@ -4,6 +4,8 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, Input, PageHeader, Select, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
 import { EmptyRow, GrantEditor, Section, Tags } from "@/components/dashboard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ModalDialog } from "@/components/Dialog";
+import dialogStyles from "@/components/Dialog.module.css";
 import {
   ApiError,
   api,
@@ -53,6 +55,12 @@ export default function ServiceAccountsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [editing, setEditing] = useState<ServiceAccountView | null>(null);
+  const [editRole, setEditRole] = useState("reader");
+  const [editGrants, setEditGrants] = useState<Grant[]>([]);
+  const [editWells, setEditWells] = useState<string[]>([]);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -155,6 +163,39 @@ export default function ServiceAccountsPage() {
     }
   }
 
+  function openEdit(account: ServiceAccountView) {
+    setEditing(account);
+    setEditRole(account.role);
+    setEditGrants(account.grants);
+    setEditWells(account.well_scope ?? []);
+    setEditError(null);
+  }
+
+  function closeEdit() {
+    if (editBusy) return;
+    setEditing(null);
+  }
+
+  async function saveEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      // Lista vacía de pozos = todos los pozos (el servidor la guarda como alcance nulo).
+      await api<ServiceAccountView>(`/service-accounts/${editing.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: editRole, grants: editGrants, well_scope: editWells }),
+      });
+      setEditing(null);
+      reload();
+    } catch (caught) {
+      setEditError(caught instanceof ApiError ? caught.message : "No se pudo guardar la cuenta.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   async function runConfirmed() {
     if (!confirming) return;
     setConfirmBusy(true);
@@ -168,6 +209,44 @@ export default function ServiceAccountsPage() {
 
   return (
     <div className={styles.stack}>
+      {editing ? (
+        <ModalDialog titleId="edit-account-title" wide busy={editBusy} onClose={closeEdit}>
+          <h2 id="edit-account-title" className={dialogStyles.title}>
+            Editar «{editing.name}»
+          </h2>
+          <p className={dialogStyles.text}>
+            Cambiar el rol, los permisos o el alcance de pozos. Los cambios aplican a las
+            próximas peticiones de la cuenta.
+          </p>
+          {editError ? <Alert>{editError}</Alert> : null}
+          <form className={dialogStyles.form} onSubmit={saveEdit}>
+            <Field label="Rol" htmlFor="edit-role">
+              <Select
+                id="edit-role"
+                data-initial-focus=""
+                value={editRole}
+                onChange={(event) => setEditRole(event.target.value)}
+              >
+                <option value="reader">reader</option>
+                <option value="writer">writer</option>
+              </Select>
+            </Field>
+            <div>
+              <span className={styles.statLabel}>Permisos</span>
+              <GrantEditor grants={editGrants} onChange={setEditGrants} />
+            </div>
+            <WellPicker value={editWells} onChange={setEditWells} />
+            <div className={dialogStyles.actions}>
+              <Button type="button" variant="ghost" onClick={closeEdit} disabled={editBusy}>
+                Cancelar
+              </Button>
+              <Button type="submit" variant="primary" disabled={editBusy}>
+                {editBusy ? "Guardando…" : "Guardar cambios"}
+              </Button>
+            </div>
+          </form>
+        </ModalDialog>
+      ) : null}
       {confirming ? (
         <ConfirmDialog
           title={confirming.title}
@@ -270,6 +349,9 @@ export default function ServiceAccountsPage() {
                           <td className={styles.faint}>{formatDateTime(account.last_used_at)}</td>
                           <td>
                             <div className={styles.actions}>
+                              <Button size="sm" onClick={() => openEdit(account)}>
+                                Editar
+                              </Button>
                               <Button size="sm" onClick={() => toggle(account)}>
                                 {account.enabled ? "Deshabilitar" : "Habilitar"}
                               </Button>

@@ -12,11 +12,15 @@
   width: min(440px, 100%);
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border-strong);
-  border-left: 3px solid var(--color-warn);
+  border-left: 3px solid var(--color-border-strong);
   border-radius: 8px;
   padding: 20px;
   display: grid;
   gap: 12px;
+}
+
+.dialog[data-tone="warn"] {
+  border-left-color: var(--color-warn);
 }
 
 .dialog[data-tone="danger"] {
@@ -41,4 +45,15 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+.wide {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.form {
+  display: grid;
+  gap: 14px;
 }
