@@ -4,35 +4,24 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
-from tests.test_wmls_soap import WELL, create_writer, soap
+from tests.test_wmls_soap import WELL, soap
 
 
-async def test_scope_rejects_wells_missing_from_inventory(
-    admin_client: AsyncClient, csrf: str
-) -> None:
-    secret = await create_writer(admin_client, csrf)
-    added = await soap(
-        admin_client,
-        "WMLS_AddToStore",
-        secret,
-        {"WMLtypeIn": "well", "XMLin": WELL, "OptionsIn": ""},
-    )
-    assert added.status_code == 200, added.text
-
+async def test_scope_cannot_be_assigned_by_hand(admin_client: AsyncClient, csrf: str) -> None:
+    """El alcance solo crece al crear pozos: una lista con pozos existentes se rechaza."""
     rejected = await admin_client.post(
         "/admin-api/v1/service-accounts",
         headers={"x-csrf-token": csrf},
         json={
-            "name": "lector.pozos",
+            "name": "lector.manual",
             "role": "reader",
             "grants": [{"object_type": "*", "action": "read"}],
-            "well_scope": ["w-1", "pozo-inexistente"],
+            "well_scope": ["w-1"],
         },
     )
     assert rejected.status_code == 422, rejected.text
     assert rejected.json()["error"] == "validation_error"
-    assert "pozo-inexistente" in rejected.json()["message"]
-    assert "w-1" not in rejected.json()["message"]
+    assert "no se asigna" in rejected.json()["message"]
 
     accepted = await admin_client.post(
         "/admin-api/v1/service-accounts",
@@ -41,15 +30,13 @@ async def test_scope_rejects_wells_missing_from_inventory(
             "name": "lector.pozos",
             "role": "reader",
             "grants": [{"object_type": "*", "action": "read"}],
-            "well_scope": ["w-1"],
+            "well_scope": [],
         },
     )
     assert accepted.status_code == 201, accepted.text
 
 
-async def test_scoped_writer_creates_well_and_owns_it(
-    admin_client: AsyncClient, csrf: str
-) -> None:
+async def test_scoped_writer_creates_well_and_owns_it(admin_client: AsyncClient, csrf: str) -> None:
     """Una cuenta sin pozos puede crear un pozo; el pozo queda en su alcance."""
     created = await admin_client.post(
         "/admin-api/v1/service-accounts",

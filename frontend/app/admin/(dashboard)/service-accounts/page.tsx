@@ -20,7 +20,6 @@ import {
   type WebAccessListView,
   type WebAccessUserView,
 } from "@/lib/api";
-import { WellPicker } from "@/components/WellPicker";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
@@ -87,7 +86,7 @@ export default function ServiceAccountsPage() {
   const [editing, setEditing] = useState<ServiceAccountView | null>(null);
   const [editRole, setEditRole] = useState("reader");
   const [editGrants, setEditGrants] = useState<Grant[]>([]);
-  const [editWells, setEditWells] = useState<string[]>([]);
+  const [editAllWells, setEditAllWells] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -241,7 +240,7 @@ export default function ServiceAccountsPage() {
     setEditing(account);
     setEditRole(account.role);
     setEditGrants(account.grants);
-    setEditWells(account.well_scope ?? []);
+    setEditAllWells(account.well_scope === null);
     setEditError(null);
   }
 
@@ -256,10 +255,19 @@ export default function ServiceAccountsPage() {
     setEditBusy(true);
     setEditError(null);
     try {
-      // Lista vacía de pozos = todos los pozos (el servidor la guarda como alcance nulo).
+      // El alcance solo se envía si cambió: crece al crear pozos, nunca se asigna a mano.
+      // "Todos los pozos" se guarda como null; "ninguno" como lista vacía.
+      const scopeChanged = editAllWells !== (editing.well_scope === null);
+      const body: { role: string; grants: Grant[]; well_scope?: null | [] } = {
+        role: editRole,
+        grants: editGrants,
+      };
+      if (scopeChanged) {
+        body.well_scope = editAllWells ? null : [];
+      }
       await api<ServiceAccountView>(`/service-accounts/${editing.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ role: editRole, grants: editGrants, well_scope: editWells }),
+        body: JSON.stringify(body),
       });
       setEditing(null);
       reload();
@@ -573,7 +581,21 @@ export default function ServiceAccountsPage() {
               <span className={styles.groupLabel}>Permisos</span>
               <GrantEditor grants={editGrants} onChange={setEditGrants} />
             </div>
-            <WellPicker value={editWells} onChange={setEditWells} />
+            <div>
+              <label className={styles.groupLabel}>
+                <input
+                  type="checkbox"
+                  checked={editAllWells}
+                  onChange={(event) => setEditAllWells(event.target.checked)}
+                />{" "}
+                Acceso a todos los pozos
+              </label>
+              <p className={styles.faint}>
+                {editAllWells
+                  ? "La cuenta ve todos los pozos, incluidos los que se creen después."
+                  : "La cuenta solo ve los pozos que ella misma crea. El alcance no se asigna a mano."}
+              </p>
+            </div>
             <div className={dialogStyles.actions}>
               <Button type="button" variant="ghost" onClick={closeEdit} disabled={editBusy}>
                 Cancelar

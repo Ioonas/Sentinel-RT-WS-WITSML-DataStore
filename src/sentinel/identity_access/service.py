@@ -191,6 +191,7 @@ class IdentityService:
         *,
         enabled: bool | None = None,
         grants: list[Grant] | None = None,
+        set_scope: bool = False,
         well_scope: set[str] | None = None,
         role: ServiceRole | None = None,
     ) -> ServiceAccountRecord:
@@ -204,8 +205,11 @@ class IdentityService:
         self._validate_grants(effective_role, list(effective_grants))
         account.role = effective_role
         account.grants = effective_grants
-        if well_scope is not None:
-            account.well_scope = frozenset(well_scope)
+        if set_scope:
+            # None = todos los pozos; conjunto vacío = ningún pozo. El conjunto solo puede
+            # crecer al crear pozos (ver witsml_application), así que aquí solo se reduce
+            # o se pasa a todos los pozos.
+            account.well_scope = frozenset(well_scope) if well_scope is not None else None
         if enabled is not None:
             account.enabled = enabled
         await self._repo.save_service_account(account)

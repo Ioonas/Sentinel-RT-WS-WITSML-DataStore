@@ -214,6 +214,19 @@ async def list_service_accounts(
     return [_account_view(item) for item in accounts]
 
 
+def _require_scope_not_assigned(well_scope: list[str] | None) -> None:
+    """El alcance no se asigna a mano: una cuenta gana pozos solo al crearlos.
+
+    Se acepta ``null`` (todos los pozos) y ``[]`` (ningún pozo). Una lista con pozos
+    existentes se rechaza.
+    """
+    if well_scope:
+        raise ValidationError(
+            "El alcance no se asigna a mano: la cuenta obtiene pozos al crearlos. "
+            "Use una lista vacía o null."
+        )
+
+
 @router.post(
     "/service-accounts",
     response_model=ServiceAccountCreatedView,
@@ -231,7 +244,7 @@ async def create_service_account(
         if payload.replaces_account_id
         else None
     )
-    await _require_known_wells(services, payload.well_scope)
+    _require_scope_not_assigned(payload.well_scope)
     account, secret = await services.identities.create_service_account(
         name=payload.name,
         role=payload.role,
@@ -289,7 +302,8 @@ async def update_service_account(
     _: AuthContext = Depends(require_csrf),
     services: RequestServices = Depends(get_services),
 ) -> ServiceAccountView:
-    await _require_known_wells(services, payload.well_scope)
+    scope_given = "well_scope" in payload.model_fields_set
+    _require_scope_not_assigned(payload.well_scope)
     account = await services.identities.update_service_account(
         account_id,
         enabled=payload.enabled,
@@ -298,6 +312,7 @@ async def update_service_account(
             if payload.grants is not None
             else None
         ),
+        set_scope=scope_given,
         well_scope=set(payload.well_scope) if payload.well_scope is not None else None,
         role=payload.role,
     )
