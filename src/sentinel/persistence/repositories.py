@@ -1296,6 +1296,7 @@ class SqlAlchemyIdentityRepository:
             accepted_at=row.accepted_at,
             created_at=row.created_at,
             revoked_at=row.revoked_at,
+            linked_service_account_id=row.linked_service_account_id,
         )
 
     async def get_invitation(self, invitation_id: str) -> InvitationRecord | None:
