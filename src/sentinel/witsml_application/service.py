@@ -1126,7 +1126,7 @@ class WitsmlStoreService:
                     object_type=object_type,
                     change_type="add",
                     change_date=now,
-                    uid_well=uid_well,
+                    uid_well=uid if object_type == "well" else uid_well,
                     uid_wellbore=uid_wellbore,
                     name_object=xd.text_of(element, "name"),
                     name_well=xd.text_of(element, "nameWell"),

@@ -34,12 +34,18 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   trajectory: "Trayectoria",
 };
 
-function objectPath(type: string, uid: string, uidWell?: string | null, uidWellbore?: string | null) {
+function objectPath(
+  type: string,
+  uid: string,
+  uidWell?: string | null,
+  uidWellbore?: string | null,
+  action = "",
+) {
   const params = new URLSearchParams();
   if (uidWell) params.set("uid_well", uidWell);
   if (uidWellbore) params.set("uid_wellbore", uidWellbore);
   const query = params.toString();
-  return `/objects/${encodeURIComponent(type)}/${encodeURIComponent(uid)}${query ? `?${query}` : ""}`;
+  return `/objects/${encodeURIComponent(type)}/${encodeURIComponent(uid)}${action}${query ? `?${query}` : ""}`;
 }
 
 export default function ObjectsPage() {
@@ -103,7 +109,7 @@ export default function ObjectsPage() {
     setActionError(null);
     try {
       const result = await api<string[]>(
-        `${objectPath(item.object_type, item.uid, item.uid_well, item.uid_wellbore)}/dependencies`,
+        objectPath(item.object_type, item.uid, item.uid_well, item.uid_wellbore, "/dependencies"),
       );
       setDetail(item);
       setDependencies(result);
@@ -158,7 +164,7 @@ export default function ObjectsPage() {
     try {
       const result = await runWithReauth(() =>
         api<MessageView>(
-        `${objectPath(deleteTarget.object_type, deleteTarget.uid, deleteTarget.uid_well, deleteTarget.uid_wellbore)}/delete`,
+        objectPath(deleteTarget.object_type, deleteTarget.uid, deleteTarget.uid_well, deleteTarget.uid_wellbore, "/delete"),
         {
           method: "POST",
           body: JSON.stringify({ reason, confirmation }),
