@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, Input, PageHeader, Select, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
 import { EmptyRow, GrantEditor, Section, Tags } from "@/components/dashboard";
+import { ActionMenu } from "@/components/ActionMenu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModalDialog } from "@/components/Dialog";
 import { useReauth } from "@/components/Reauth";
@@ -426,7 +427,6 @@ export default function ServiceAccountsPage() {
                         <tr key={account.id}>
                           <td>
                             <strong>{account.name}</strong>
-                            <div className={styles.faint}>{account.id}</div>
                           </td>
                           <td>{account.role}</td>
                           <td>
@@ -465,23 +465,26 @@ export default function ServiceAccountsPage() {
                                 Solo lectura{account.purge_at ? ` · se borra el ${formatDateTime(account.purge_at)}` : ""}
                               </span>
                             ) : (
-                            <div className={styles.actions}>
-                              <Button size="sm" onClick={() => openEdit(account)}>
-                                Editar
-                              </Button>
-                              <Button size="sm" onClick={() => toggle(account)}>
-                                {account.enabled ? "Deshabilitar" : "Habilitar"}
-                              </Button>
-                              <Button size="sm" onClick={() => rotate(account)}>
-                                Rotar
-                              </Button>
-                              <Button size="sm" variant="danger" onClick={() => revoke(account)}>
-                                Revocar
-                              </Button>
-                              <Button size="sm" variant="danger" onClick={() => archive(account)}>
-                                Archivar
-                              </Button>
-                            </div>
+                            <ActionMenu
+                              items={[
+                                { label: "Editar", onSelect: () => openEdit(account) },
+                                {
+                                  label: account.enabled ? "Deshabilitar" : "Habilitar",
+                                  onSelect: () => toggle(account),
+                                },
+                                { label: "Rotar credencial", onSelect: () => rotate(account) },
+                                {
+                                  label: "Revocar credencial",
+                                  danger: true,
+                                  onSelect: () => revoke(account),
+                                },
+                                {
+                                  label: "Archivar cuenta",
+                                  danger: true,
+                                  onSelect: () => archive(account),
+                                },
+                              ]}
+                            />
                             )}
                           </td>
                         </tr>
