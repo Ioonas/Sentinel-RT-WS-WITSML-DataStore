@@ -195,6 +195,54 @@ async def test_rotate_accepts_admin_defined_credential_and_archive_hides_account
     assert patch_archived.status_code == 409
 
 
+async def test_invitation_can_be_revoked_and_resent(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    headers = {"x-csrf-token": csrf}
+    created = await admin_client.post(
+        "/admin-api/v1/invitations",
+        headers=headers,
+        json={"email": "auditoria.reenvio@example.com", "role": "auditor"},
+    )
+    assert created.status_code == 201, created.text
+    first_id = created.json()["id"]
+
+    resent = await admin_client.post(
+        f"/admin-api/v1/invitations/{first_id}/resend", headers=headers
+    )
+    assert resent.status_code == 201, resent.text
+    second_id = resent.json()["id"]
+    assert second_id != first_id
+
+    # El reenvío invalida la invitación anterior: no puede reenviarse ni cancelarse de nuevo.
+    stale_resend = await admin_client.post(
+        f"/admin-api/v1/invitations/{first_id}/resend", headers=headers
+    )
+    assert stale_resend.status_code == 409
+    stale_revoke = await admin_client.post(
+        f"/admin-api/v1/invitations/{first_id}/revoke", headers=headers
+    )
+    assert stale_revoke.status_code == 409
+
+    revoked = await admin_client.post(
+        f"/admin-api/v1/invitations/{second_id}/revoke", headers=headers
+    )
+    assert revoked.status_code == 200, revoked.text
+
+    listing = await admin_client.get("/admin-api/v1/invitations")
+    assert listing.status_code == 200
+    assert all(item["id"] not in {first_id, second_id} for item in listing.json())
+
+    revoke_again = await admin_client.post(
+        f"/admin-api/v1/invitations/{second_id}/revoke", headers=headers
+    )
+    assert revoke_again.status_code == 409
+    resend_revoked = await admin_client.post(
+        f"/admin-api/v1/invitations/{second_id}/resend", headers=headers
+    )
+    assert resend_revoked.status_code == 409
+
+
 async def test_roles_permissions_and_audit(admin_client: AsyncClient) -> None:
     roles = await admin_client.get("/admin-api/v1/roles")
     assert roles.status_code == 200

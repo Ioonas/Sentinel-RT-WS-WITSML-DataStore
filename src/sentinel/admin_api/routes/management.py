@@ -490,6 +490,78 @@ async def create_invitation(
     )
 
 
+@router.post(
+    "/invitations/{invitation_id}/revoke",
+    response_model=InvitationSummaryView,
+)
+async def revoke_invitation(
+    invitation_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> InvitationSummaryView:
+    invitation = await services.identities.revoke_invitation(invitation_id)
+    await audit(
+        services,
+        auth,
+        action="invitation.revoked",
+        correlation=correlation_id(request),
+        object_type="invitation",
+        object_uid=invitation.id,
+        details={"email": invitation.email, "role": invitation.role.value},
+    )
+    return InvitationSummaryView(
+        id=invitation.id,
+        email=invitation.email,
+        role=invitation.role.value,
+        created_by=invitation.created_by,
+        created_at=invitation.created_at,
+        expires_at=invitation.expires_at,
+    )
+
+
+@router.post(
+    "/invitations/{invitation_id}/resend",
+    response_model=InvitationView,
+    status_code=status.HTTP_201_CREATED,
+)
+async def resend_invitation(
+    invitation_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> InvitationView:
+    invitation, token = await services.identities.resend_invitation(
+        invitation_id, created_by=auth.principal.id
+    )
+    await services.mail.enqueue_invitation(invitation.email, token)
+    await audit(
+        services,
+        auth,
+        action="invitation.resent",
+        correlation=correlation_id(request),
+        object_type="invitation",
+        object_uid=invitation_id,
+        details={
+            "email": invitation.email,
+            "role": invitation.role.value,
+            "replaced_by": invitation.id,
+        },
+    )
+    settings = request.app.state.container.settings
+    return InvitationView(
+        id=invitation.id,
+        email=invitation.email,
+        role=invitation.role.value,
+        expires_at=invitation.expires_at,
+        token=token if settings.is_development else None,
+    )
+
+
 # ----------------------------------------------------------------------
 # Roles, permisos y acceso efectivo
 # ----------------------------------------------------------------------

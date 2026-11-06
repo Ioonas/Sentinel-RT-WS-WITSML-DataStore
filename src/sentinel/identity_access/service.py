@@ -426,12 +426,27 @@ class IdentityService:
             raise ValidationError("El correo no tiene un formato válido.")
         if await self._repo.get_admin_user_by_email(normalized) is not None:
             raise ConflictError("Ya existe un usuario con ese correo.")
+        return await self._issue_invitation(
+            email=normalized,
+            role=role,
+            created_by=created_by,
+            permissions=permissions,
+        )
+
+    async def _issue_invitation(
+        self,
+        *,
+        email: str,
+        role: HumanRole,
+        created_by: str,
+        permissions: set[str] | None,
+    ) -> tuple[InvitationRecord, str]:
         delegated = self._validate_delegated_permissions(role, permissions)
         token = self._ids.new_token()
         now = self._clock.now()
         invitation = InvitationRecord(
             id=self._ids.new_uid(),
-            email=normalized,
+            email=email,
             role=role,
             token_hash=self._tokens.hash_token(token),
             expires_at=now + INVITATION_TTL,
@@ -441,6 +456,38 @@ class IdentityService:
         )
         await self._repo.save_invitation(invitation)
         return invitation, token
+
+    async def revoke_invitation(self, invitation_id: str) -> InvitationRecord:
+        invitation = await self._open_invitation(invitation_id)
+        await self._repo.mark_invitation_revoked(invitation.id, self._clock.now())
+        return invitation
+
+    async def resend_invitation(
+        self, invitation_id: str, *, created_by: str
+    ) -> tuple[InvitationRecord, str]:
+        """Revoca la invitación anterior y emite una nueva con token y vencimiento propios."""
+        previous = await self._open_invitation(invitation_id)
+        if await self._repo.get_admin_user_by_email(previous.email) is not None:
+            raise ConflictError("Ya existe un usuario con ese correo.")
+        # Solo el rol administrador conserva permisos explícitos; los demás toman los del rol.
+        delegated = set(previous.permissions) if previous.role == HumanRole.ADMIN else None
+        await self._repo.mark_invitation_revoked(previous.id, self._clock.now())
+        return await self._issue_invitation(
+            email=previous.email,
+            role=previous.role,
+            created_by=created_by,
+            permissions=delegated,
+        )
+
+    async def _open_invitation(self, invitation_id: str) -> InvitationRecord:
+        invitation = await self._repo.get_invitation(invitation_id)
+        if invitation is None:
+            raise NotFoundError("Invitación no encontrada.")
+        if invitation.accepted_at is not None:
+            raise ConflictError("La invitación ya fue aceptada.")
+        if invitation.revoked_at is not None:
+            raise ConflictError("La invitación ya fue cancelada o reemplazada.")
+        return invitation
 
     async def accept_invitation(
         self, token: str, password: str, display_name: str | None = None
@@ -452,6 +499,7 @@ class IdentityService:
         if (
             invitation is None
             or invitation.accepted_at is not None
+            or invitation.revoked_at is not None
             or invitation.expires_at <= now
         ):
             raise ValidationError("La invitación no es válida o ha expirado.")
@@ -473,7 +521,7 @@ class IdentityService:
         return user
 
     async def list_pending_invitations(self) -> list[InvitationRecord]:
-        return await self._repo.list_pending_invitations(self._clock.now())
+        return await self._repo.list_pending_invitations()
 
     async def list_admin_users(self) -> list[AdminUserRecord]:
         return await self._repo.list_admin_users()

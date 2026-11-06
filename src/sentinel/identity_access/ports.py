@@ -107,6 +107,7 @@ class InvitationRecord:
     permissions: frozenset[str] = field(default_factory=frozenset)
     accepted_at: datetime | None = None
     created_at: datetime | None = None
+    revoked_at: datetime | None = None
 
 
 @dataclass
@@ -159,7 +160,13 @@ class IdentityRepositoryPort(Protocol):
         self, invitation_id: str, accepted_at: datetime
     ) -> None: ...
 
-    async def list_pending_invitations(self, now: datetime) -> list[InvitationRecord]: ...
+    async def get_invitation(self, invitation_id: str) -> InvitationRecord | None: ...
+
+    async def mark_invitation_revoked(
+        self, invitation_id: str, revoked_at: datetime
+    ) -> None: ...
+
+    async def list_pending_invitations(self) -> list[InvitationRecord]: ...
 
     async def save_password_reset(self, reset: PasswordResetRecord) -> None: ...
 

@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useReauth } from "@/components/Reauth";
 import styles from "../dashboard.module.css";
 
@@ -33,6 +34,15 @@ const HUMAN_ROLES = [
   { value: "operador", label: "Operador" },
   { value: "administrador_seguridad", label: "Administrador de seguridad" },
 ];
+
+type ConfirmRequest = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  run: () => Promise<void>;
+};
+
+const INVITATION_EXPIRED = (expiresAt: string) => new Date(expiresAt).getTime() <= Date.now();
 
 export default function AdminUsersPage() {
   const { runWithReauth } = useReauth();
@@ -45,6 +55,9 @@ export default function AdminUsersPage() {
   const [invitation, setInvitation] = useState<InvitationView | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [actingInvitationId, setActingInvitationId] = useState<string | null>(null);
+  const [invitationActionError, setInvitationActionError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("auditor");
@@ -92,6 +105,70 @@ export default function AdminUsersPage() {
     }
   }
 
+  function describeActionError(caught: unknown, fallback: string, reauthMessage: string): string {
+    if (caught instanceof ApiError) {
+      return caught.code === "reauth_required" ? reauthMessage : caught.message;
+    }
+    return fallback;
+  }
+
+  async function resendInvitation(item: InvitationSummaryView) {
+    setActingInvitationId(item.id);
+    setInvitationActionError(null);
+    try {
+      const result = await runWithReauth(() =>
+        api<InvitationView>(`/invitations/${item.id}/resend`, { method: "POST" }),
+      );
+      setInvitation(result);
+      pendingInvitations.reload();
+    } catch (caught) {
+      setInvitationActionError(
+        describeActionError(
+          caught,
+          "No se pudo reenviar la invitación.",
+          "La invitación no se reenvió. Confirme su contraseña para continuar.",
+        ),
+      );
+    } finally {
+      setActingInvitationId(null);
+    }
+  }
+
+  async function revokeInvitation(item: InvitationSummaryView) {
+    setActingInvitationId(item.id);
+    setInvitationActionError(null);
+    try {
+      await runWithReauth(() => api(`/invitations/${item.id}/revoke`, { method: "POST" }));
+      pendingInvitations.reload();
+    } catch (caught) {
+      setInvitationActionError(
+        describeActionError(
+          caught,
+          "No se pudo cancelar la invitación.",
+          "La invitación no se canceló. Confirme su contraseña para continuar.",
+        ),
+      );
+    } finally {
+      setActingInvitationId(null);
+    }
+  }
+
+  function askCancelInvitation(item: InvitationSummaryView) {
+    setConfirming({
+      title: "Cancelar invitación",
+      description: `El enlace enviado a ${item.email} dejará de aceptarse. Si necesita invitarlo de nuevo, cree una invitación nueva.`,
+      confirmLabel: "Cancelar invitación",
+      run: () => revokeInvitation(item),
+    });
+  }
+
+  function runConfirmed() {
+    const request = confirming;
+    // Se cierra primero para que la reautenticación no quede apilada sobre la confirmación.
+    setConfirming(null);
+    void request?.run();
+  }
+
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!selected) return;
@@ -129,7 +206,7 @@ export default function AdminUsersPage() {
 
       {invitation ? (
         <Alert tone="ok">
-          Invitación creada para <strong>{invitation.email}</strong> (vence {formatDateTime(invitation.expires_at)}).
+          Invitación generada para <strong>{invitation.email}</strong> (vence {formatDateTime(invitation.expires_at)}).
           {invitation.token ? (
             <>
               {" "}Enlace de desarrollo:{" "}
@@ -249,13 +326,14 @@ export default function AdminUsersPage() {
       <Card>
         <Section
           title="Invitaciones pendientes"
-          description="Invitaciones no aceptadas y no vencidas. Los enlaces no se vuelven a mostrar; para reenviar, cree una nueva invitación."
+          description="Invitaciones no aceptadas ni canceladas. Reenviar genera un enlace nuevo e invalida el anterior."
           actions={
             <Button size="sm" variant="ghost" onClick={() => pendingInvitations.reload()}>
               Actualizar
             </Button>
           }
         >
+          {invitationActionError ? <Alert>{invitationActionError}</Alert> : null}
           {pendingInvitations.loading ? (
             <Spinner />
           ) : pendingInvitations.error ? (
@@ -267,22 +345,53 @@ export default function AdminUsersPage() {
                   <tr>
                     <th>Correo</th>
                     <th>Rol</th>
+                    <th>Estado</th>
                     <th>Creada</th>
                     <th>Vence</th>
+                    <th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pendingInvitations.data && pendingInvitations.data.length > 0 ? (
-                    pendingInvitations.data.map((item) => (
-                      <tr key={item.id}>
-                        <td className={styles.wrap}>{item.email}</td>
-                        <td>{item.role}</td>
-                        <td className={styles.faint}>{formatDateTime(item.created_at)}</td>
-                        <td className={styles.faint}>{formatDateTime(item.expires_at)}</td>
-                      </tr>
-                    ))
+                    pendingInvitations.data.map((item) => {
+                      const expired = INVITATION_EXPIRED(item.expires_at);
+                      const acting = actingInvitationId === item.id;
+                      return (
+                        <tr key={item.id}>
+                          <td className={styles.wrap}>{item.email}</td>
+                          <td>{item.role}</td>
+                          <td>
+                            <StatusBadge
+                              status={expired ? "danger" : "neutral"}
+                              label={expired ? "Vencida" : "Pendiente"}
+                            />
+                          </td>
+                          <td className={styles.faint}>{formatDateTime(item.created_at)}</td>
+                          <td className={styles.faint}>{formatDateTime(item.expires_at)}</td>
+                          <td>
+                            <div className={styles.actions}>
+                              <Button
+                                size="sm"
+                                onClick={() => void resendInvitation(item)}
+                                disabled={actingInvitationId !== null}
+                              >
+                                {acting ? "Reenviando…" : "Reenviar"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() => askCancelInvitation(item)}
+                                disabled={actingInvitationId !== null}
+                              >
+                                Cancelar
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
-                    <EmptyRow colSpan={4}>No hay invitaciones pendientes.</EmptyRow>
+                    <EmptyRow colSpan={6}>No hay invitaciones pendientes.</EmptyRow>
                   )}
                 </tbody>
               </table>
@@ -359,6 +468,18 @@ export default function AdminUsersPage() {
             </form>
           </Section>
         </Card>
+      ) : null}
+
+      {confirming ? (
+        <ConfirmDialog
+          title={confirming.title}
+          description={confirming.description}
+          confirmLabel={confirming.confirmLabel}
+          tone="danger"
+          busy={actingInvitationId !== null}
+          onConfirm={runConfirmed}
+          onCancel={() => setConfirming(null)}
+        />
       ) : null}
     </div>
   );

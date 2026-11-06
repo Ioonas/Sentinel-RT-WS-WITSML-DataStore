@@ -1236,28 +1236,26 @@ class SqlAlchemyIdentityRepository:
             permissions=frozenset(row.permissions or ()),
             accepted_at=row.accepted_at,
             created_at=row.created_at,
+            revoked_at=row.revoked_at,
         )
 
-    async def list_pending_invitations(self, now: datetime) -> list[InvitationRecord]:
+    async def get_invitation(self, invitation_id: str) -> InvitationRecord | None:
+        row = await self._session.get(InvitationRow, invitation_id)
+        if row is None:
+            return None
+        return _to_invitation(row)
+
+    async def list_pending_invitations(self) -> list[InvitationRecord]:
+        # Incluye vencidas: son las que el administrador puede reenviar.
         rows = await self._session.scalars(
             select(InvitationRow)
-            .where(InvitationRow.accepted_at.is_(None), InvitationRow.expires_at > now)
+            .where(
+                InvitationRow.accepted_at.is_(None),
+                InvitationRow.revoked_at.is_(None),
+            )
             .order_by(InvitationRow.created_at.desc())
         )
-        return [
-            InvitationRecord(
-                id=row.id,
-                email=row.email,
-                role=HumanRole(row.role),
-                token_hash=row.token_hash,
-                expires_at=row.expires_at,
-                created_by=row.created_by,
-                permissions=frozenset(row.permissions or ()),
-                accepted_at=row.accepted_at,
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
+        return [_to_invitation(row) for row in rows]
 
     async def mark_invitation_accepted(
         self, invitation_id: str, accepted_at: datetime
@@ -1266,6 +1264,15 @@ class SqlAlchemyIdentityRepository:
             update(InvitationRow)
             .where(InvitationRow.id == invitation_id)
             .values(accepted_at=accepted_at)
+        )
+
+    async def mark_invitation_revoked(
+        self, invitation_id: str, revoked_at: datetime
+    ) -> None:
+        await self._session.execute(
+            update(InvitationRow)
+            .where(InvitationRow.id == invitation_id)
+            .values(revoked_at=revoked_at)
         )
 
     async def save_password_reset(self, reset: PasswordResetRecord) -> None:
@@ -1461,3 +1468,18 @@ class SqlAlchemyRepositories:
 
     async def ping(self) -> None:
         await self.session.execute(text("SELECT 1"))
+
+
+def _to_invitation(row: InvitationRow) -> InvitationRecord:
+    return InvitationRecord(
+        id=row.id,
+        email=row.email,
+        role=HumanRole(row.role),
+        token_hash=row.token_hash,
+        expires_at=row.expires_at,
+        created_by=row.created_by,
+        permissions=frozenset(row.permissions or ()),
+        accepted_at=row.accepted_at,
+        created_at=row.created_at,
+        revoked_at=row.revoked_at,
+    )
