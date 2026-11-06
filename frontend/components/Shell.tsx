@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useEffect, type ReactNode } from "react";
+import { api, ApiError, type SessionView } from "@/lib/api";
+import { useApiQuery } from "@/lib/hooks";
 import { Button } from "./ui";
 import styles from "./Shell.module.css";
 
@@ -18,9 +19,22 @@ const NAV = [
   { href: "/admin/profile", label: "Mi cuenta" },
 ];
 
+/** Secciones que ve una persona con acceso web vinculado: solo lectura de objetos. */
+const LINKED_NAV_HREFS = new Set(["/admin/objects", "/admin/profile"]);
+
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const profile = useApiQuery<SessionView>("/profile");
+  const linked = Boolean(profile.data?.linked_service_account);
+  const items = linked ? NAV.filter((item) => LINKED_NAV_HREFS.has(item.href)) : NAV;
+
+  useEffect(() => {
+    // Una persona vinculada no tiene resumen: se lleva a sus objetos.
+    if (linked && (pathname === "/admin/overview" || pathname === "/admin")) {
+      router.replace("/admin/objects");
+    }
+  }, [linked, pathname, router]);
 
   async function logout() {
     try {
@@ -44,7 +58,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </span>
         </Link>
         <nav aria-label="Administración" className={styles.nav}>
-          {NAV.map((item) => {
+          {items.map((item) => {
             const active = pathname === item.href;
             return (
               <Link
