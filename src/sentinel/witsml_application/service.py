@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from xml.sax.saxutils import escape
 
 from lxml import etree
 
@@ -867,8 +868,40 @@ class WitsmlStoreService:
         )
         return result
 
+    async def create_object_as_admin(
+        self, object_type: str, *, uid: str | None, uid_well: str | None, name: str
+    ) -> str:
+        """Alta de pozo o pozo lateral iniciada por un administrador humano.
+
+        Aplica la misma validación XSD, unicidad y padre que WMLS_AddToStore.
+        La autorización la decide el permiso admin.objects.write, no los derechos
+        WITSML de un cliente. Devuelve el uid asignado.
+        """
+        if object_type == "well":
+            uid_value = xd.normalize_uid(uid or "") or self._ids.new_uid()
+            xml = (
+                f'<wells version="1.4.1.1"><well uid="{escape(uid_value)}">'
+                f"<name>{escape(name)}</name></well></wells>"
+            )
+        elif object_type == "wellbore":
+            if not uid_well:
+                raise WitsmlError(WmlsCode.MISSING_UID, "Indique el uid del pozo.")
+            await self._require_parent("well", uid_well)
+            parent = await self._wells.get(uid_well)
+            uid_value = xd.normalize_uid(uid or "") or self._ids.new_uid()
+            xml = (
+                f'<wellbores version="1.4.1.1">'
+                f'<wellbore uid="{escape(uid_value)}" uidWell="{escape(uid_well)}">'
+                f"<nameWell>{escape(parent.name or uid_well)}</nameWell>"
+                f"<name>{escape(name)}</name></wellbore></wellbores>"
+            )
+        else:
+            raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
+        await self._add(None, object_type=object_type, xml_in=xml)
+        return uid_value
+
     async def _add(
-        self, principal: Principal, *, object_type: str, xml_in: str
+        self, principal: Principal | None, *, object_type: str, xml_in: str
     ) -> StoreResult:
         if object_type not in WRITABLE_TYPES:
             raise WitsmlError(WmlsCode.OBJECT_TYPE_NOT_SUPPORTED)
@@ -892,7 +925,10 @@ class WitsmlStoreService:
             uid_wellbore = xd.attr(element, "uidWellbore")
             if object_type == "well":
                 uid_well = xd.attr(element, "uid")
-            if not principal.allows_witsml(WitsmlAction.WRITE, object_type, uid_well):
+            # Con principal None (alta administrativa) el permiso admin ya autorizó.
+            if principal is not None and not principal.allows_witsml(
+                WitsmlAction.WRITE, object_type, uid_well
+            ):
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
 
             uid = xd.normalize_uid(xd.attr(element, "uid")) or self._ids.new_uid()

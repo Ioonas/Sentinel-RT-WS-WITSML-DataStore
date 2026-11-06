@@ -13,7 +13,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { EmptyRow, Section, Tags } from "@/components/dashboard";
-import { ApiError, api, type MessageView, type ObjectView } from "@/lib/api";
+import { ApiError, api, type MessageView, type ObjectView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import { useReauth } from "@/components/Reauth";
@@ -36,6 +36,18 @@ export default function ObjectsPage() {
   const [uidWellbore, setUidWellbore] = useState("");
   const [name, setName] = useState("");
   const [queryPath, setQueryPath] = useState<string | null>(null);
+
+  const profile = useApiQuery<SessionView>("/profile");
+  const canCreate = profile.data?.user.permissions.includes("admin.objects.write") ?? false;
+  const wellOptions = useApiQuery<ObjectView[]>(
+    canCreate ? "/objects?objectType=well&limit=1000" : null,
+  );
+  const [createType, setCreateType] = useState<"well" | "wellbore">("well");
+  const [createUid, setCreateUid] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createParent, setCreateParent] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const results = useApiQuery<ObjectView[]>(queryPath);
   const [detail, setDetail] = useState<ObjectView | null>(null);
@@ -92,6 +104,36 @@ export default function ObjectsPage() {
     setConfirmation("");
     setActionError(null);
     setMessage(null);
+  }
+
+  async function createObject(event: FormEvent) {
+    event.preventDefault();
+    setCreateBusy(true);
+    setCreateError(null);
+    setMessage(null);
+    try {
+      const created = await runWithReauth(() =>
+        api<ObjectView>(`/objects/${createType}`, {
+          method: "POST",
+          body: JSON.stringify({
+            uid: createUid.trim() || null,
+            name: createName.trim(),
+            uid_well: createType === "wellbore" ? createParent : null,
+          }),
+        }),
+      );
+      setMessage(
+        `${createType === "well" ? "Pozo" : "Pozo lateral"} creado: ${created.name ?? created.uid} (uid ${created.uid}).`,
+      );
+      setCreateUid("");
+      setCreateName("");
+      wellOptions.reload();
+      if (queryPath) results.reload();
+    } catch (caught) {
+      setCreateError(caught instanceof ApiError ? caught.message : "No se pudo crear el objeto.");
+    } finally {
+      setCreateBusy(false);
+    }
   }
 
   async function remove(event: FormEvent) {
@@ -178,6 +220,73 @@ export default function ObjectsPage() {
           </div>
         </form>
       </Card>
+
+      {canCreate ? (
+        <Card>
+          <Section
+            title="Crear pozo o pozo lateral"
+            description="Alta directa en el Store, con las mismas validaciones XSD que WMLS_AddToStore. Requiere reautenticación y queda auditada."
+          >
+            {createError ? <Alert>{createError}</Alert> : null}
+            <form className={styles.form} onSubmit={createObject}>
+              <div className={styles.formRow}>
+                <Field label="Tipo" htmlFor="create-type">
+                  <Select
+                    id="create-type"
+                    value={createType}
+                    onChange={(event) => setCreateType(event.target.value as "well" | "wellbore")}
+                  >
+                    <option value="well">Pozo</option>
+                    <option value="wellbore">Pozo lateral (wellbore)</option>
+                  </Select>
+                </Field>
+                {createType === "wellbore" ? (
+                  <Field label="Pozo padre" htmlFor="create-parent" hint="Pozo al que pertenece el pozo lateral.">
+                    <Select
+                      id="create-parent"
+                      value={createParent}
+                      onChange={(event) => setCreateParent(event.target.value)}
+                    >
+                      <option value="">Seleccione un pozo…</option>
+                      {(wellOptions.data ?? []).map((well) => (
+                        <option key={well.uid} value={well.uid}>
+                          {well.name ?? well.uid}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : null}
+                <Field label="Nombre" htmlFor="create-name">
+                  <Input
+                    id="create-name"
+                    required
+                    maxLength={64}
+                    value={createName}
+                    onChange={(event) => setCreateName(event.target.value)}
+                  />
+                </Field>
+                <Field label="UID (opcional)" htmlFor="create-uid" hint="Si se omite, el sistema asigna uno.">
+                  <Input
+                    id="create-uid"
+                    maxLength={64}
+                    value={createUid}
+                    onChange={(event) => setCreateUid(event.target.value)}
+                  />
+                </Field>
+              </div>
+              <div className={styles.actions}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={createBusy || (createType === "wellbore" && !createParent)}
+                >
+                  {createBusy ? "Creando…" : "Crear"}
+                </Button>
+              </div>
+            </form>
+          </Section>
+        </Card>
+      ) : null}
 
       <div className={styles.split}>
         <Card>

@@ -28,6 +28,7 @@ class AdminPermission(StrEnum):
     IDENTITY_WRITE = "admin.identities.write"
     AUDIT_READ = "admin.audit.read"
     OBJECTS_READ = "admin.objects.read"
+    OBJECTS_WRITE = "admin.objects.write"
     OBJECTS_DELETE = "admin.objects.delete"
     HEALTH_READ = "admin.health.read"
     ROLES_READ = "admin.roles.read"

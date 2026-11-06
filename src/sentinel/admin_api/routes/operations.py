@@ -17,12 +17,15 @@ from sentinel.admin_api.schemas import (
     DependencyHealthView,
     HealthView,
     MessageView,
+    ObjectCreateRequest,
     ObjectDeleteRequest,
     ObjectView,
 )
 from sentinel.bootstrap.container import RequestServices
 from sentinel.identity_access.domain import AdminPermission
-from sentinel.shared.errors import ValidationError
+from sentinel.shared.errors import ConflictError, ValidationError
+from sentinel.witsml_application.domain.codes import WmlsCode
+from sentinel.witsml_application.domain.errors import WitsmlError
 from sentinel.witsml_application.inventory import ObjectSummary
 
 router = APIRouter(tags=["Operación"])
@@ -60,6 +63,69 @@ async def search_objects(
         limit=limit,
     )
     return [_object_view(item) for item in items]
+
+
+async def _create_object(
+    services: RequestServices,
+    auth: AuthContext,
+    request: Request,
+    *,
+    object_type: str,
+    payload: ObjectCreateRequest,
+) -> ObjectView:
+    try:
+        uid = await services.witsml.create_object_as_admin(
+            object_type, uid=payload.uid, uid_well=payload.uid_well, name=payload.name
+        )
+    except WitsmlError as exc:
+        if exc.wmls_code == int(WmlsCode.DUPLICATE_OBJECT):
+            raise ConflictError("Ya existe un objeto con ese uid.") from exc
+        raise ValidationError(str(exc)) from exc
+    await audit(
+        services,
+        auth,
+        action="object.created",
+        correlation=correlation_id(request),
+        object_type=object_type,
+        object_uid=uid,
+        details={"uid_well": payload.uid_well, "name": payload.name},
+    )
+    item = await services.inventory.get(
+        object_type, uid, uid_well=payload.uid_well, uid_wellbore=None
+    )
+    return _object_view(item)
+
+
+@router.post("/objects/well", response_model=ObjectView, status_code=201)
+async def create_well(
+    payload: ObjectCreateRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ObjectView:
+    if payload.uid_well:
+        raise ValidationError("Un pozo no admite uid_well; use el alta de pozo lateral.")
+    return await _create_object(
+        services, auth, request, object_type="well", payload=payload
+    )
+
+
+@router.post("/objects/wellbore", response_model=ObjectView, status_code=201)
+async def create_wellbore(
+    payload: ObjectCreateRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ObjectView:
+    if not payload.uid_well:
+        raise ValidationError("Indique el uid del pozo al que pertenece el pozo lateral.")
+    return await _create_object(
+        services, auth, request, object_type="wellbore", payload=payload
+    )
 
 
 @router.get("/objects/{object_type}/{uid}", response_model=ObjectView)

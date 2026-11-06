@@ -230,6 +230,12 @@ class ObjectView(BaseModel):
     growing: bool
 
 
+class ObjectCreateRequest(StrictModel):
+    uid: str | None = Field(default=None, min_length=1, max_length=64)
+    uid_well: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=64)
+
+
 class ObjectDeleteRequest(StrictModel):
     reason: str = Field(min_length=5, max_length=500)
     confirmation: str = Field(min_length=1, max_length=128)

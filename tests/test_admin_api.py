@@ -331,6 +331,61 @@ async def test_admin_routes_manage_user_sessions(admin_client: AsyncClient, csrf
     assert missing.status_code == 404
 
 
+async def test_admin_creates_well_and_wellbore_with_validation(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    headers = {"x-csrf-token": csrf}
+
+    generated = await admin_client.post(
+        "/admin-api/v1/objects/well", headers=headers, json={"name": "Pozo generado"}
+    )
+    assert generated.status_code == 201, generated.text
+    assert generated.json()["uid"]
+
+    well = await admin_client.post(
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"uid": "adm-well-1", "name": "Pozo A & <B>"},
+    )
+    assert well.status_code == 201, well.text
+    assert well.json()["uid"] == "adm-well-1"
+    assert well.json()["name"] == "Pozo A & <B>"
+
+    duplicate = await admin_client.post(
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"uid": "adm-well-1", "name": "Otro"},
+    )
+    assert duplicate.status_code == 409, duplicate.text
+
+    wellbore = await admin_client.post(
+        "/admin-api/v1/objects/wellbore",
+        headers=headers,
+        json={"uid": "adm-wb-1", "uid_well": "adm-well-1", "name": "Sondeo 1"},
+    )
+    assert wellbore.status_code == 201, wellbore.text
+    assert wellbore.json()["uid_well"] == "adm-well-1"
+
+    orphan = await admin_client.post(
+        "/admin-api/v1/objects/wellbore",
+        headers=headers,
+        json={"uid_well": "no-existe", "name": "Huérfano"},
+    )
+    assert orphan.status_code == 422, orphan.text
+
+    no_parent = await admin_client.post(
+        "/admin-api/v1/objects/wellbore", headers=headers, json={"name": "Sin padre"}
+    )
+    assert no_parent.status_code == 422, no_parent.text
+
+    well_with_parent = await admin_client.post(
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"uid_well": "adm-well-1", "name": "Mezcla"},
+    )
+    assert well_with_parent.status_code == 422, well_with_parent.text
+
+
 async def test_roles_permissions_and_audit(admin_client: AsyncClient) -> None:
     roles = await admin_client.get("/admin-api/v1/roles")
     assert roles.status_code == 200
