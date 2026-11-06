@@ -186,14 +186,20 @@ def format_index_value(value: datetime | Decimal | None) -> str:
     return format(value.normalize(), "f")
 
 
+UID_MAX_LENGTH = 64
+
+
 def normalize_uid(value: str | None) -> str | None:
+    """Valida un uid según abstractUidString de WITSML 1.4.1.1 (maxLength 64, sin espacios)."""
     if value is None:
         return None
-    uid = value.strip()
-    if not uid:
+    if not value.strip():
         return None
-    if len(uid) > 128:
-        raise ValidationError("El UID excede 128 caracteres.")
+    if " " in value:
+        raise ValidationError("El UID no puede contener espacios.")
+    uid = value
+    if len(uid) > UID_MAX_LENGTH:
+        raise ValidationError(f"El UID excede {UID_MAX_LENGTH} caracteres.")
     if any(ord(ch) < 32 for ch in uid):
         raise ValidationError("El UID contiene caracteres de control.")
     return uid
