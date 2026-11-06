@@ -89,6 +89,15 @@ def session_reference(token_hash: str) -> str:
     return hashlib.sha256(f"session-ref:{token_hash}".encode()).hexdigest()[:32]
 
 
+def _is_unlinked_reader(user: AdminUserRecord) -> bool:
+    """Lector vinculado sin cuenta de servicio: vínculo roto, puede volver a invitarse."""
+    return (
+        user.role == HumanRole.LINKED_READER
+        and user.linked_service_account_id is None
+        and user.enabled
+    )
+
+
 class IdentityService:
     def __init__(
         self,
@@ -554,7 +563,10 @@ class IdentityService:
         normalized = email.strip().lower()
         if not _EMAIL.match(normalized):
             raise ValidationError("El correo no tiene un formato válido.")
-        if await self._repo.get_admin_user_by_email(normalized) is not None:
+        existing = await self._repo.get_admin_user_by_email(normalized)
+        # Un lector vinculado sin cuenta (vínculo roto) puede volver a invitarse: al aceptar
+        # recibe contraseña nueva y queda vinculado. Cualquier otro correo registrado se rechaza.
+        if existing is not None and not _is_unlinked_reader(existing):
             raise ConflictError("Ya existe un usuario con ese correo.")
         if any(item.email == normalized for item in await self._repo.list_pending_invitations()):
             raise ConflictError(
@@ -672,7 +684,22 @@ class IdentityService:
         ):
             raise ValidationError("La invitación no es válida o ha expirado.")
         self._validate_password(password, context=context_terms(invitation.email, display_name))
-        if await self._repo.get_admin_user_by_email(invitation.email) is not None:
+        existing = await self._repo.get_admin_user_by_email(invitation.email)
+        relinkable = _is_unlinked_reader(existing) if existing is not None else False
+        if relinkable and invitation.linked_service_account_id:
+            # Vínculo roto: se reutiliza la misma persona con la contraseña recién definida.
+            existing.password_hash = self._hasher.hash(password)
+            existing.enabled = True
+            existing.linked_service_account_id = invitation.linked_service_account_id
+            existing.failed_attempts = 0
+            existing.locked_until = None
+            existing.permissions = permissions_for_role(HumanRole.LINKED_READER.value)
+            if display_name:
+                existing.display_name = display_name
+            await self._repo.save_admin_user(existing)
+            await self._repo.mark_invitation_accepted(invitation.id, now)
+            return existing
+        if existing is not None:
             raise ConflictError("Ya existe un usuario con ese correo.")
         user = AdminUserRecord(
             id=self._ids.new_uid(),
