@@ -1,7 +1,8 @@
 "use client";
 
+import { permissionLabel } from "@/lib/permissions";
 import { Alert, Card, PageHeader, Spinner, StatusBadge } from "@/components/ui";
-import { EmptyRow, Section, Tags } from "@/components/dashboard";
+import { EmptyRow, PermissionList, Section, Tags } from "@/components/dashboard";
 import {
   type AccessView,
   type Grant,
@@ -53,7 +54,7 @@ export default function AccessPage() {
                           <strong>{role.name}</strong>
                         </td>
                         <td>
-                          <Tags values={role.permissions} />
+                          <Tags values={role.permissions.map(permissionLabel)} />
                         </td>
                       </tr>
                     ))
@@ -95,7 +96,7 @@ export default function AccessPage() {
                               values={
                                 entry.kind === "service"
                                   ? entry.grants.map(grantLabel)
-                                  : entry.permissions
+                                  : entry.permissions.map(permissionLabel)
                               }
                             />
                           </td>
@@ -116,7 +117,7 @@ export default function AccessPage() {
             {permissions.loading ? (
               <Spinner />
             ) : (
-              <Tags values={(permissions.data ?? []).map((item) => item.name)} />
+              <PermissionList names={(permissions.data ?? []).map((item) => item.name)} />
             )}
           </Section>
         </Card>

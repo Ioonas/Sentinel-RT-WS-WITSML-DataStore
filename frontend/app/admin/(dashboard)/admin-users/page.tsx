@@ -1,5 +1,6 @@
 "use client";
 
+import { permissionLabel } from "@/lib/permissions";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   Alert,
@@ -531,7 +532,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <span className={styles.statLabel}>Permisos efectivos</span>
-                <Tags values={selected.permissions} />
+                <Tags values={selected.permissions.map(permissionLabel)} />
               </div>
               {editRole === "administrador" ? (
                 <div>

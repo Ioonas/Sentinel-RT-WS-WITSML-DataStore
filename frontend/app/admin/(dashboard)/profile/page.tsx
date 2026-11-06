@@ -1,5 +1,6 @@
 "use client";
 
+import { permissionLabel } from "@/lib/permissions";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, PageHeader, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
@@ -170,7 +171,7 @@ export default function ProfilePage() {
               </dl>
               <div style={{ marginTop: "var(--space-4)" }}>
                 <span className={styles.statLabel}>Permisos</span>
-                <Tags values={user.permissions} />
+                <Tags values={user.permissions.map(permissionLabel)} />
               </div>
             </Section>
           </Card>

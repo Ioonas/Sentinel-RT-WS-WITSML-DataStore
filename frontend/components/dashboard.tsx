@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Button, Input, Select } from "./ui";
 import type { Grant } from "@/lib/api";
 import styles from "@/app/admin/(dashboard)/dashboard.module.css";
+import { permissionInfo } from "@/lib/permissions";
 
 const OBJECT_TYPES = ["*", "well", "wellbore", "log", "trajectory"] as const;
 const ACTIONS = ["read", "write", "delete"] as const;
@@ -58,6 +59,23 @@ export function EmptyRow({ colSpan, children }: { colSpan: number; children: Rea
         {children}
       </td>
     </tr>
+  );
+}
+
+export function PermissionList({ names }: { names: string[] }) {
+  if (names.length === 0) return <span className={styles.faint}>—</span>;
+  return (
+    <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
+      {names.map((name) => {
+        const info = permissionInfo(name);
+        return (
+          <li key={name}>
+            <strong>{info.label}</strong>
+            <span className={styles.faint}> — {info.description}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -165,16 +183,22 @@ export function PermissionChecks({
 
   return (
     <div className={styles.checks}>
-      {options.map((permission) => (
-        <label key={permission} className={styles.check}>
-          <input
-            type="checkbox"
-            checked={selected.includes(permission)}
-            onChange={() => toggle(permission)}
-          />
-          <span>{permission}</span>
-        </label>
-      ))}
+      {options.map((permission) => {
+        const info = permissionInfo(permission);
+        return (
+          <label key={permission} className={styles.check}>
+            <input
+              type="checkbox"
+              checked={selected.includes(permission)}
+              onChange={() => toggle(permission)}
+            />
+            <span>
+              <strong>{info.label}</strong>
+              <span className={styles.faint}> — {info.description}</span>
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }
