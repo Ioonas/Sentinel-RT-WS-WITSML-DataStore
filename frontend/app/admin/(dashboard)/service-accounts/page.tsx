@@ -466,6 +466,7 @@ export default function ServiceAccountsPage() {
                               </span>
                             ) : (
                             <ActionMenu
+                              subject={account.name}
                               items={[
                                 { label: "Editar", onSelect: () => openEdit(account) },
                                 {
