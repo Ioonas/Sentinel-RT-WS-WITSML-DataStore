@@ -32,6 +32,7 @@ from sentinel.admin_api.schemas import (
 )
 from sentinel.audit_config.domain import AuditChannel, AuditResult
 from sentinel.bootstrap.container import RequestServices
+from sentinel.identity_access.domain import ALL_ADMIN_PERMISSIONS
 from sentinel.identity_access.service import session_reference
 from sentinel.shared.errors import AuthenticationError
 
@@ -243,10 +244,15 @@ async def get_profile(
     services: RequestServices = Depends(get_services),
 ) -> SessionView:
     user = await services.identities.get_admin_user(auth.principal.id)
+    principal = auth.principal
     return SessionView(
         user=user_view(user),
         expires_at=auth.session.expires_at,
         linked_service_account=await services.identities.linked_account_name(user),
+        permissions=sorted(ALL_ADMIN_PERMISSIONS)
+        if principal.is_superadmin
+        else sorted(principal.permissions),
+        is_superadmin=principal.is_superadmin,
     )
 
 

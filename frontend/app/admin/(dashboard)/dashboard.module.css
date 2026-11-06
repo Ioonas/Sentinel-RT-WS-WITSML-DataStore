@@ -301,3 +301,11 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Agrupa controles que solo puede editar un superadministrador. */
+.plain {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}

@@ -1,3 +1,5 @@
+import type { SessionView } from "./api";
+
 /**
  * Nombres sencillos y descripciones de los permisos administrativos.
  * Las vistas muestran estos textos; el nombre técnico solo se usa internamente.
@@ -46,4 +48,14 @@ export function permissionInfo(name: string): PermissionInfo {
 
 export function permissionLabel(name: string): string {
   return permissionInfo(name).label;
+}
+
+/**
+ * Permiso efectivo de la sesión. El superadministrador lo tiene todo; el resto, solo
+ * los permisos que le otorga su rol o su delegación. El backend siempre valida; esto
+ * solo decide qué se muestra.
+ */
+export function can(session: SessionView | null | undefined, permission: string): boolean {
+  if (!session) return false;
+  return session.is_superadmin || session.permissions.includes(permission);
 }

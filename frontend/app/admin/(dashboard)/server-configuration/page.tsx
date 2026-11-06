@@ -3,13 +3,16 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, Input, PageHeader, Spinner, StatusBadge } from "@/components/ui";
 import { Section, Stat } from "@/components/dashboard";
-import { ApiError, api, type ServerConfigView } from "@/lib/api";
+import { ApiError, api, type ServerConfigView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
 
 export default function ServerConfigurationPage() {
   const { data, error, loading, reload } = useApiQuery<ServerConfigView>("/server-config");
+  const session = useApiQuery<SessionView>("/profile");
+  // Solo el superadministrador cambia contacto e identidad; el resto ve los valores.
+  const canEdit = Boolean(session.data?.is_superadmin);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
@@ -117,6 +120,7 @@ export default function ServerConfigurationPage() {
                 {feedback ? <Alert tone="ok">{feedback}</Alert> : null}
                 {saveError ? <Alert>{saveError}</Alert> : null}
                 <form className={styles.form} onSubmit={submit}>
+<fieldset className={styles.plain} disabled={!canEdit}>
                   <div className={styles.formRow}>
                     <Field label="Correo de contacto" htmlFor="contact-email">
                       <Input
@@ -146,7 +150,8 @@ export default function ServerConfigurationPage() {
                   <p className={styles.faint}>
                     Solo un superadministrador puede modificar el contacto. Cada cambio queda auditado.
                   </p>
-                </form>
+                </fieldset>
+</form>
               </Section>
             </Card>
 
@@ -176,6 +181,7 @@ export default function ServerConfigurationPage() {
               {serviceFeedback ? <Alert tone="ok">{serviceFeedback}</Alert> : null}
               {serviceError ? <Alert>{serviceError}</Alert> : null}
               <form className={styles.form} onSubmit={submitServiceInfo}>
+<fieldset className={styles.plain} disabled={!canEdit}>
                 <Field label="Nombre del servicio" htmlFor="service-name" hint="Entre 3 y 255 caracteres.">
                   <Input
                     id="service-name"
@@ -200,7 +206,8 @@ export default function ServerConfigurationPage() {
                     {serviceBusy ? "Guardando…" : "Guardar identidad"}
                   </Button>
                 </div>
-              </form>
+              </fieldset>
+</form>
             </Section>
           </Card>
 

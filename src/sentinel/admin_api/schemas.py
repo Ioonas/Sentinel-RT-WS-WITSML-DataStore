@@ -42,6 +42,9 @@ class SessionView(BaseModel):
     expires_at: datetime | None = None
     # Solo para acceso web vinculado: cuenta de servicio cuyos datos se ven.
     linked_service_account: str | None = None
+    # Permisos efectivos de la sesión (el superadministrador los tiene todos).
+    permissions: list[str] = []
+    is_superadmin: bool = False
 
 
 class LoginRequest(StrictModel):

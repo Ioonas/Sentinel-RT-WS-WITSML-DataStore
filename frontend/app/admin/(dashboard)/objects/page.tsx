@@ -17,6 +17,7 @@ import { ActionMenu } from "@/components/ActionMenu";
 import { ModalDialog } from "@/components/Dialog";
 import { ApiError, api, type MessageView, type ObjectView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { can } from "@/lib/permissions";
 import { useApiQuery } from "@/lib/hooks";
 import { useReauth } from "@/components/Reauth";
 import dialogStyles from "@/components/Dialog.module.css";
@@ -50,8 +51,8 @@ export default function ObjectsPage() {
   const [queryPath, setQueryPath] = useState<string | null>(null);
 
   const profile = useApiQuery<SessionView>("/profile");
-  const canCreate = profile.data?.user.permissions.includes("admin.objects.write") ?? false;
-  const canDelete = profile.data?.user.permissions.includes("admin.objects.delete") ?? false;
+  const canCreate = can(profile.data, "admin.objects.write");
+  const canDelete = can(profile.data, "admin.objects.delete");
   const wellOptions = useApiQuery<ObjectView[]>(
     canCreate ? "/objects?objectType=well&limit=1000" : null,
   );

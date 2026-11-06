@@ -85,6 +85,9 @@ export type SessionView = {
   expires_at: string | null;
   /** Solo acceso web vinculado: nombre de la cuenta de servicio cuyos datos se ven. */
   linked_service_account?: string | null;
+  /** Permisos efectivos de la sesión (ver lib/permissions.ts). */
+  permissions: string[];
+  is_superadmin: boolean;
 };
 
 export type WebAccessUserView = {

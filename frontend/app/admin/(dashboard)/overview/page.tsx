@@ -10,6 +10,7 @@ import {
   type SessionView,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { can } from "@/lib/permissions";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
 
@@ -33,8 +34,10 @@ function healthTone(status: string | undefined): "ok" | "warn" | "danger" | "neu
 export default function OverviewPage() {
   const profile = useApiQuery<SessionView>("/profile");
   const config = useApiQuery<ServerConfigView>("/server-config");
-  const health = useApiQuery<DependencyHealth>("/health/dependencies");
-  const outbox = useApiQuery<MessageView>("/mail-outbox/pending");
+  // Salud y cola de correo exigen admin.health.read; sin él no se piden ni se muestran.
+  const canHealth = can(profile.data, "admin.health.read");
+  const health = useApiQuery<DependencyHealth>(canHealth ? "/health/dependencies" : null);
+  const outbox = useApiQuery<MessageView>(canHealth ? "/mail-outbox/pending" : null);
 
   const user = profile.data?.user;
 
@@ -44,10 +47,12 @@ export default function OverviewPage() {
         title={user ? `Hola, ${user.display_name}` : "Resumen"}
         description="Estado operativo, configuración pública y accesos rápidos del DataStore."
         actions={
-          <StatusBadge
-            status={healthTone(health.data?.status)}
-            label={health.data?.status ?? (health.error ? "sin permiso" : "consultando")}
-          />
+          canHealth ? (
+            <StatusBadge
+              status={healthTone(health.data?.status)}
+              label={health.data?.status ?? (health.error ? "sin permiso" : "consultando")}
+            />
+          ) : undefined
         }
       />
 
@@ -75,16 +80,19 @@ export default function OverviewPage() {
             hint={config.data?.updated_at ? `Actualizada ${formatDateTime(config.data.updated_at)}` : undefined}
           />
         </Card>
-        <Card>
-          <Stat
-            label="Correo pendiente"
-            value={outbox.data?.message ?? "—"}
-            hint="Cola de invitaciones y recuperación"
-          />
-        </Card>
+        {canHealth ? (
+          <Card>
+            <Stat
+              label="Correo pendiente"
+              value={outbox.data?.message ?? "—"}
+              hint="Cola de invitaciones y recuperación"
+            />
+          </Card>
+        ) : null}
       </div>
 
       <div className={styles.split}>
+        {canHealth ? (
         <Card>
           <Section
             title="Estado de dependencias"
@@ -138,6 +146,7 @@ export default function OverviewPage() {
             )}
           </Section>
         </Card>
+        ) : null}
 
         <Card>
           <Section title="Contacto público" description="Datos expuestos en GetCap.">
