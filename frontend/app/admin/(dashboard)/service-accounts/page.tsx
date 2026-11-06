@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, Input, PageHeader, Select, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
 import { EmptyRow, GrantEditor, Section, Tags } from "@/components/dashboard";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   ApiError,
   api,
@@ -14,6 +15,14 @@ import { WellPicker } from "@/components/WellPicker";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
+
+type ConfirmRequest = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  tone: "warn" | "danger";
+  run: () => Promise<void>;
+};
 
 type CreatedAccount = {
   account: ServiceAccountView;
@@ -42,6 +51,8 @@ export default function ServiceAccountsPage() {
   const [created, setCreated] = useState<CreatedAccount | null>(null);
   const [rotated, setRotated] = useState<{ name: string; secret: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -97,10 +108,18 @@ export default function ServiceAccountsPage() {
     }
   }
 
-  async function rotate(account: ServiceAccountView) {
-    if (!window.confirm(`¿Rotar la credencial de "${account.name}"? La anterior dejará de funcionar.`)) {
-      return;
-    }
+  function rotate(account: ServiceAccountView) {
+    setConfirming({
+      title: `Rotar la credencial de «${account.name}»`,
+      description:
+        "Se genera una credencial nueva y la actual deja de funcionar de inmediato. Los clientes que la usen tendrán que actualizarla.",
+      confirmLabel: "Rotar credencial",
+      tone: "warn",
+      run: () => rotateNow(account),
+    });
+  }
+
+  async function rotateNow(account: ServiceAccountView) {
     setActionError(null);
     setCreated(null);
     try {
@@ -114,8 +133,18 @@ export default function ServiceAccountsPage() {
     }
   }
 
-  async function revoke(account: ServiceAccountView) {
-    if (!window.confirm(`¿Revocar la credencial de "${account.name}"?`)) return;
+  function revoke(account: ServiceAccountView) {
+    setConfirming({
+      title: `Revocar la credencial de «${account.name}»`,
+      description:
+        "La cuenta deja de autenticarse hasta que se genere una credencial nueva. Esta acción no se puede deshacer.",
+      confirmLabel: "Revocar credencial",
+      tone: "danger",
+      run: () => revokeNow(account),
+    });
+  }
+
+  async function revokeNow(account: ServiceAccountView) {
     setActionError(null);
     try {
       await api(`/service-accounts/${account.id}/revoke-credential`, { method: "POST" });
@@ -126,8 +155,30 @@ export default function ServiceAccountsPage() {
     }
   }
 
+  async function runConfirmed() {
+    if (!confirming) return;
+    setConfirmBusy(true);
+    try {
+      await confirming.run();
+    } finally {
+      setConfirmBusy(false);
+      setConfirming(null);
+    }
+  }
+
   return (
     <div className={styles.stack}>
+      {confirming ? (
+        <ConfirmDialog
+          title={confirming.title}
+          description={confirming.description}
+          confirmLabel={confirming.confirmLabel}
+          tone={confirming.tone}
+          busy={confirmBusy}
+          onConfirm={runConfirmed}
+          onCancel={() => setConfirming(null)}
+        />
+      ) : null}
       <PageHeader
         title="Cuentas de servicio"
         description="Identidades WMLS con permisos por objeto y alcance opcional por pozo. Las credenciales se muestran una sola vez."
