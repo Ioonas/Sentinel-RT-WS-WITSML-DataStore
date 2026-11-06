@@ -18,6 +18,8 @@ from sentinel.admin_api.deps import (
 )
 from sentinel.admin_api.schemas import (
     AcceptInvitationRequest,
+    GrantView,
+    LinkedAccountView,
     LoginRequest,
     MessageView,
     PasswordChangeRequest,
@@ -245,10 +247,22 @@ async def get_profile(
 ) -> SessionView:
     user = await services.identities.get_admin_user(auth.principal.id)
     principal = auth.principal
+    account = await services.identities.linked_account(user)
     return SessionView(
         user=user_view(user),
         expires_at=auth.session.expires_at,
-        linked_service_account=await services.identities.linked_account_name(user),
+        linked_service_account=account.name if account is not None else None,
+        linked_account=LinkedAccountView(
+            name=account.name,
+            role=account.role.value,
+            enabled=account.enabled,
+            archived=account.is_archived,
+            grants=[GrantView(**grant.to_dict()) for grant in account.grants],
+            well_scope=sorted(account.well_scope) if account.well_scope is not None else None,
+            last_used_at=account.last_used_at,
+        )
+        if account is not None
+        else None,
         permissions=sorted(ALL_ADMIN_PERMISSIONS)
         if principal.is_superadmin
         else sorted(principal.permissions),

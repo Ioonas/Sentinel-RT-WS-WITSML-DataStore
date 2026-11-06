@@ -62,6 +62,16 @@ export async function api<T>(
   return payload as T;
 }
 
+export type LinkedAccountView = {
+  name: string;
+  role: string;
+  enabled: boolean;
+  archived: boolean;
+  grants: Grant[];
+  well_scope: string[] | null;
+  last_used_at: string | null;
+};
+
 export type Grant = {
   object_type: string;
   action: "read" | "write" | "delete";
@@ -85,6 +95,8 @@ export type SessionView = {
   expires_at: string | null;
   /** Solo acceso web vinculado: nombre de la cuenta de servicio cuyos datos se ven. */
   linked_service_account?: string | null;
+  /** Solo acceso web vinculado: datos de la cuenta de servicio vinculada. */
+  linked_account?: LinkedAccountView | null;
   /** Permisos efectivos de la sesión (ver lib/permissions.ts). */
   permissions: string[];
   is_superadmin: boolean;

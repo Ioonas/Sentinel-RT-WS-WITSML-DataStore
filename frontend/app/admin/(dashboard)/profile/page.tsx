@@ -6,10 +6,63 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, PageHeader, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
 import { EmptyRow, Section, Tags } from "@/components/dashboard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { ApiError, api, type MessageView, type ProfileSessionView, type SessionView } from "@/lib/api";
+import { ApiError, api, type Grant, type LinkedAccountView, type MessageView, type ProfileSessionView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
+
+const ROLE_LABELS: Record<string, string> = {
+  reader: "Solo lectura",
+  writer: "Lectura y escritura",
+};
+
+function grantLabel(grant: Grant): string {
+  return `${grant.object_type}:${grant.action}${grant.uid_well ? `@${grant.uid_well}` : ""}`;
+}
+
+function linkedStatus(account: LinkedAccountView): { label: string; status: "ok" | "danger" | "neutral" } {
+  if (account.archived) return { label: "Archivada", status: "neutral" };
+  return account.enabled ? { label: "Activa", status: "ok" } : { label: "Deshabilitada", status: "danger" };
+}
+
+function LinkedAccountCard({ account }: { account: LinkedAccountView }) {
+  const status = linkedStatus(account);
+  return (
+    <Card>
+      <Section
+        title="Cuenta de servicio vinculada"
+        description="Esta cuenta define qué objetos puede ver. Solo la administran usuarios con permiso de identidades."
+      >
+        <dl className={styles.detailsGrid}>
+          <dt>Nombre</dt>
+          <dd>{account.name}</dd>
+          <dt>Rol</dt>
+          <dd>{ROLE_LABELS[account.role] ?? account.role}</dd>
+          <dt>Estado</dt>
+          <dd>
+            <StatusBadge status={status.status} label={status.label} />
+          </dd>
+          <dt>Último uso</dt>
+          <dd>{formatDateTime(account.last_used_at)}</dd>
+          <dt>Permisos</dt>
+          <dd>
+            <Tags values={account.grants.map(grantLabel)} />
+          </dd>
+          <dt>Pozos</dt>
+          <dd>
+            {account.well_scope === null ? (
+              "Todos los pozos"
+            ) : account.well_scope.length === 0 ? (
+              <span className={styles.faint}>Ninguno todavía. La cuenta gana pozos al crearlos.</span>
+            ) : (
+              <Tags values={account.well_scope} />
+            )}
+          </dd>
+        </dl>
+      </Section>
+    </Card>
+  );
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -157,7 +210,7 @@ export default function ProfilePage() {
                 <dt>Correo</dt>
                 <dd>{user.email}</dd>
                 <dt>Rol</dt>
-                <dd>{user.role}</dd>
+                <dd>{data?.linked_account ? "Lector vinculado" : user.role}</dd>
                 <dt>Estado</dt>
                 <dd>
                   <StatusBadge status={user.enabled ? "ok" : "danger"} label={user.enabled ? "Activo" : "Deshabilitado"} />
@@ -175,6 +228,8 @@ export default function ProfilePage() {
               </div>
             </Section>
           </Card>
+
+          {data?.linked_account ? <LinkedAccountCard account={data.linked_account} /> : null}
 
           <Card>
             <Section

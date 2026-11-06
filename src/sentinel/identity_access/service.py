@@ -568,11 +568,11 @@ class IdentityService:
             linked_service_account_id=account.id,
         )
 
-    async def linked_account_name(self, user: AdminUserRecord) -> str | None:
+    async def linked_account(self, user: AdminUserRecord) -> ServiceAccountRecord | None:
+        """Cuenta de servicio a la que está vinculada la persona, si lo está."""
         if user.role != HumanRole.LINKED_READER or not user.linked_service_account_id:
             return None
-        account = await self._repo.get_service_account(user.linked_service_account_id)
-        return account.name if account is not None else None
+        return await self._repo.get_service_account(user.linked_service_account_id)
 
     async def list_web_access(
         self, account_id: str

@@ -37,11 +37,25 @@ class UserView(BaseModel):
     last_login_at: datetime | None = None
 
 
+class LinkedAccountView(BaseModel):
+    """Datos de la cuenta de servicio vinculada, para que su persona los revise."""
+
+    name: str
+    role: str
+    enabled: bool
+    archived: bool
+    grants: list[GrantView]
+    # Pozos que la cuenta creó; ``None`` significa todos (no es el caso de un vínculo).
+    well_scope: list[str] | None = None
+    last_used_at: datetime | None = None
+
+
 class SessionView(BaseModel):
     user: UserView
     expires_at: datetime | None = None
     # Solo para acceso web vinculado: cuenta de servicio cuyos datos se ven.
     linked_service_account: str | None = None
+    linked_account: LinkedAccountView | None = None
     # Permisos efectivos de la sesión (el superadministrador los tiene todos).
     permissions: list[str] = []
     is_superadmin: bool = False
