@@ -213,7 +213,6 @@ export default function LoginPage() {
         {setupCompleted ? (
           <div className={styles.links}>
             <Link href="/admin/recover">Recuperar acceso</Link>
-            <Link href="/admin/accept-invitation">Aceptar invitación</Link>
           </div>
         ) : null}
         <p className={styles.note}>
