@@ -175,6 +175,18 @@ class ChangeLogRow(Base):
     )
 
 
+class ObjectOwnerRow(Base):
+    """Creador de un objeto WITSML. Las claves vacías se guardan como cadena vacía."""
+
+    __tablename__ = "witsml_object_owners"
+    __table_args__ = (Index("ix_witsml_object_owners_owner", "owner_id"),)
+    object_type: Mapped[str] = mapped_column(String(16), primary_key=True)
+    uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    uid_well: Mapped[str] = mapped_column(String(128), primary_key=True, default="")
+    uid_wellbore: Mapped[str] = mapped_column(String(128), primary_key=True, default="")
+    owner_id: Mapped[str | None] = mapped_column(String(64))
+
+
 class AuditEventRow(Base):
     __tablename__ = "audit_events"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

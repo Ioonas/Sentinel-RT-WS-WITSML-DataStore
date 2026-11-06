@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -36,6 +36,7 @@ from sentinel.persistence.tables import (
     LogSampleRow,
     MailOutboxRow,
     MudLogRow,
+    ObjectOwnerRow,
     PasswordResetRow,
     ServerConfigRow,
     ServiceAccountRow,
@@ -1502,6 +1503,71 @@ class SqlAlchemyMailOutbox:
         )
 
 
+class SqlAlchemyObjectOwnerRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _key_clause(object_type: str, uid: str, uid_well: str, uid_wellbore: str) -> Any:
+        return and_(
+            ObjectOwnerRow.object_type == object_type,
+            ObjectOwnerRow.uid == uid,
+            ObjectOwnerRow.uid_well == uid_well,
+            ObjectOwnerRow.uid_wellbore == uid_wellbore,
+        )
+
+    async def record(
+        self,
+        object_type: str,
+        uid: str,
+        uid_well: str,
+        uid_wellbore: str,
+        owner_id: str | None,
+    ) -> None:
+        # Upsert: un administrador que vuelve a crear un uid borrado lo deja sin dueño.
+        row = await self._session.scalar(
+            select(ObjectOwnerRow).where(
+                self._key_clause(object_type, uid, uid_well, uid_wellbore)
+            )
+        )
+        if row is None:
+            self._session.add(
+                ObjectOwnerRow(
+                    object_type=object_type,
+                    uid=uid,
+                    uid_well=uid_well,
+                    uid_wellbore=uid_wellbore,
+                    owner_id=owner_id,
+                )
+            )
+        else:
+            row.owner_id = owner_id
+        await self._session.flush()
+
+    async def owner_of(
+        self, object_type: str, uid: str, uid_well: str, uid_wellbore: str
+    ) -> str | None:
+        return await self._session.scalar(
+            select(ObjectOwnerRow.owner_id).where(
+                self._key_clause(object_type, uid, uid_well, uid_wellbore)
+            )
+        )
+
+    async def owned_keys(self, owner_id: str) -> frozenset[tuple[str, str, str, str]]:
+        # Incluye objetos ya borrados: el historial de cambios de la cuenta sigue visible.
+        rows = (
+            await self._session.execute(
+                select(
+                    ObjectOwnerRow.object_type,
+                    ObjectOwnerRow.uid,
+                    ObjectOwnerRow.uid_well,
+                    ObjectOwnerRow.uid_wellbore,
+                ).where(ObjectOwnerRow.owner_id == owner_id)
+            )
+        ).all()
+        return frozenset((r.object_type, r.uid, r.uid_well, r.uid_wellbore) for r in rows)
+
+
 class SqlAlchemyRepositories:
     """Contenedor de repositorios ligados a una sesión/transacción."""
 
@@ -1513,6 +1579,7 @@ class SqlAlchemyRepositories:
         self.mud_logs = SqlAlchemyMudLogRepository(session)
         self.trajectories = SqlAlchemyTrajectoryRepository(session)
         self.change_log = SqlAlchemyChangeLogRepository(session)
+        self.object_owners = SqlAlchemyObjectOwnerRepository(session)
         self.audit = SqlAlchemyAuditRepository(session)
         self.config = SqlAlchemyConfigRepository(session)
         self.identities = SqlAlchemyIdentityRepository(session)

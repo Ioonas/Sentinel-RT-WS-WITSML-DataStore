@@ -117,10 +117,21 @@ class Principal:
     well_scope: frozenset[str] | None = None
     # Solo cuentas de servicio con este indicador pueden borrar en cascada (WMLS -414 si no).
     can_cascade_delete: bool = False
+    # Cuenta de servicio dueña de lo que crea (o cuenta vinculada, para lectura).
+    owner_id: str | None = None
 
     @property
     def is_superadmin(self) -> bool:
         return self.kind == PrincipalKind.HUMAN and self.role == HumanRole.SUPERADMIN.value
+
+    @property
+    def owner_scoped(self) -> bool:
+        """Con alcance por pozo, solo cuenta lo que creó la propia cuenta.
+
+        Los objetos creados por un administrador quedan fuera de su alcance, igual que
+        los pozos que no creó. Sin alcance (``None``) no hay restricción de propiedad.
+        """
+        return self.well_scope is not None and not (self.is_superadmin or self.is_system)
 
     @property
     def is_system(self) -> bool:

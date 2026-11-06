@@ -40,11 +40,13 @@ from sentinel.witsml_application.ports import (
     ListFilter,
     LogRepositoryPort,
     MudLogRepositoryPort,
+    ObjectOwnerPort,
     SchemaValidatorPort,
     StoreResult,
     TrajectoryRepositoryPort,
     WellboreRepositoryPort,
     WellRepositoryPort,
+    object_key,
 )
 from sentinel.xml_schema import documents as xd
 from sentinel.xml_schema.objects import WRITABLE_TYPES, spec_for
@@ -84,8 +86,10 @@ class WitsmlStoreService:
         validator: SchemaValidatorPort,
         uom: UomValidator | None = None,
         well_scope_recorder: WellScopeRecorder | None = None,
+        object_owners: ObjectOwnerPort | None = None,
     ) -> None:
         self._scope_recorder = well_scope_recorder
+        self._owners = object_owners
         self._wells = wells
         self._wellbores = wellbores
         self._logs = logs
@@ -201,6 +205,7 @@ class WitsmlStoreService:
         partial = False
         budget = config.max_data_nodes
         readable_wells = principal.readable_wells
+        owned = await self._owned_keys(principal)
 
         for query in queries:
             if not principal.allows_witsml(WitsmlAction.READ, object_type, query.uid_well):
@@ -223,6 +228,10 @@ class WitsmlStoreService:
             )
             now = self._clock.now()
             for record in records:
+                if owned is not None and self._object_key(
+                    object_type, record.uid, record.uid_well, record.uid_wellbore
+                ) not in owned:
+                    continue
                 if query.object_growing is not None:
                     actual = (
                         record.growing_until is not None
@@ -708,6 +717,7 @@ class WitsmlStoreService:
         options = xd.parse_options(options_xml)
         latest_only = options.return_elements == "latest-change-only"
         queries = xd.parse_queries(query_xml, "changeLog")
+        owned = await self._owned_keys(principal)
         merged: dict[
             tuple[str, str, str | None, str | None], list[ChangeLogRecord]
         ] = {}
@@ -724,6 +734,10 @@ class WitsmlStoreService:
                 tuple[str, str, str | None, str | None], list[ChangeLogRecord]
             ] = {}
             for record in records:
+                if owned is not None and self._object_key(
+                    record.object_type, record.uid, record.uid_well, record.uid_wellbore
+                ) not in owned:
+                    continue
                 key = (
                     record.object_type,
                     record.uid,
@@ -941,6 +955,18 @@ class WitsmlStoreService:
                 or (object_type == "well" and principal.allows_create_well())
             ):
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
+            if principal is not None and object_type in (
+                "wellbore",
+                "log",
+                "mudLog",
+                "trajectory",
+            ):
+                if object_type == "wellbore":
+                    await self._require_owned_parent(principal, "well", uid_well or "", None)
+                else:
+                    await self._require_owned_parent(
+                        principal, "wellbore", uid_wellbore or "", uid_well
+                    )
 
             uid = xd.normalize_uid(xd.attr(element, "uid")) or self._ids.new_uid()
             element.set("uid", uid)
@@ -1107,6 +1133,13 @@ class WitsmlStoreService:
                     name_wellbore=xd.text_of(element, "nameWellbore"),
                 )
             )
+            await self._record_owner(
+                principal,
+                object_type,
+                uid,
+                uid if object_type == "well" else uid_well,
+                uid_wellbore,
+            )
             uids.append(uid)
 
         return StoreResult(
@@ -1188,6 +1221,7 @@ class WitsmlStoreService:
             )
             if existing is None:
                 raise WitsmlError(WmlsCode.OBJECT_NOT_EXIST)
+            await self._require_owned(principal, object_type, existing)
             self._require_matching_token(
                 xd.last_change_token(element), existing.changed_at
             )
@@ -1601,6 +1635,7 @@ class WitsmlStoreService:
             )
             if existing is None:
                 raise WitsmlError(WmlsCode.OBJECT_NOT_EXIST)
+            await self._require_owned(principal, object_type, existing)
             self._require_matching_token(
                 xd.last_change_token(element), existing.changed_at, deleting=True
             )
@@ -1740,6 +1775,66 @@ class WitsmlStoreService:
     # ------------------------------------------------------------------
     # Utilidades internas
     # ------------------------------------------------------------------
+    @staticmethod
+    def _object_key(
+        object_type: str, uid: str, uid_well: str | None, uid_wellbore: str | None
+    ) -> tuple[str, str, str, str]:
+        return object_key(object_type, uid, uid_well, uid_wellbore)
+
+    async def _owned_keys(
+        self, principal: Principal
+    ) -> frozenset[tuple[str, str, str, str]] | None:
+        """Objetos que puede ver la cuenta; ``None`` si no hay restricción de propiedad."""
+        if not principal.owner_scoped:
+            return None
+        if principal.owner_id is None or self._owners is None:
+            return frozenset()
+        return await self._owners.owned_keys(principal.owner_id)
+
+    async def _require_owned(
+        self, principal: Principal, object_type: str, record: StoredObject
+    ) -> None:
+        """Una cuenta acotada solo cambia lo que creó; lo ajeno se rechaza."""
+        if not principal.owner_scoped:
+            return
+        owner = None
+        if self._owners is not None:
+            owner = await self._owners.owner_of(
+                *self._object_key(
+                    object_type, record.uid, record.uid_well, record.uid_wellbore
+                )
+            )
+        if principal.owner_id is None or owner != principal.owner_id:
+            raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
+
+    async def _record_owner(
+        self,
+        principal: Principal | None,
+        object_type: str,
+        uid: str,
+        uid_well: str | None,
+        uid_wellbore: str | None,
+    ) -> None:
+        if self._owners is None:
+            return
+        owner_id = principal.owner_id if principal is not None else None
+        await self._owners.record(
+            *self._object_key(object_type, uid, uid_well, uid_wellbore), owner_id
+        )
+
+    async def _require_owned_parent(
+        self, principal: Principal, parent_type: str, uid: str, uid_well: str | None
+    ) -> None:
+        """Un hijo solo nace bajo un padre que también creó la cuenta."""
+        if not principal.owner_scoped:
+            return
+        if parent_type == "well":
+            parent = await self._wells.get(uid)
+        else:
+            parent = await self._wellbores.get(uid, uid_well)
+        if parent is not None:
+            await self._require_owned(principal, parent_type, parent)
+
     def _repository(self, object_type: str) -> Any:
         return {
             "well": self._wells,
@@ -1928,6 +2023,8 @@ class WitsmlStoreService:
                 WitsmlAction.DELETE, child_type, child.uid_well
             ):
                 raise WitsmlError(WmlsCode.INSUFFICIENT_RIGHTS)
+            # Un dependiente ajeno (creado por un admin u otra cuenta) bloquea la cascada.
+            await self._require_owned(principal, child_type, child)
         for child_type, child in plan:
             await self._delete_record(child_type, child)
             await self._record_delete(child_type, child, now)

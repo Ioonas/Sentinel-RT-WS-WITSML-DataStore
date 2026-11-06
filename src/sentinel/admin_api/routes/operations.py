@@ -61,6 +61,7 @@ async def search_objects(
         name=name,
         allowed_wells=auth.principal.readable_wells,
         limit=limit,
+        principal=auth.principal,
     )
     return [_object_view(item) for item in items]
 
@@ -132,13 +133,17 @@ async def create_wellbore(
 async def get_object(
     object_type: str,
     uid: str,
-    _: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_READ)),
+    auth: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_READ)),
     services: RequestServices = Depends(get_services),
     uid_well: str | None = None,
     uid_wellbore: str | None = None,
 ) -> ObjectView:
     item = await services.inventory.get(
-        object_type, uid, uid_well=uid_well, uid_wellbore=uid_wellbore
+        object_type,
+        uid,
+        uid_well=uid_well,
+        uid_wellbore=uid_wellbore,
+        principal=auth.principal,
     )
     return _object_view(item)
 
@@ -147,13 +152,17 @@ async def get_object(
 async def get_object_dependencies(
     object_type: str,
     uid: str,
-    _: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_READ)),
+    auth: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_READ)),
     services: RequestServices = Depends(get_services),
     uid_well: str | None = None,
     uid_wellbore: str | None = None,
 ) -> list[str]:
     return await services.inventory.dependencies(
-        object_type, uid, uid_well=uid_well, uid_wellbore=uid_wellbore
+        object_type,
+        uid,
+        uid_well=uid_well,
+        uid_wellbore=uid_wellbore,
+        principal=auth.principal,
     )
 
 

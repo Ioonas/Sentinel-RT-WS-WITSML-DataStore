@@ -103,6 +103,7 @@ class Container:
                 validator=self.validator,
                 uom=self.uom,
                 well_scope_recorder=identities,
+                object_owners=repos.object_owners,
             )
             inventory = InventoryService(
                 wells=repos.wells,
@@ -111,6 +112,7 @@ class Container:
                 mud_logs=repos.mud_logs,
                 trajectories=repos.trajectories,
                 change_log=repos.change_log,
+                object_owners=repos.object_owners,
             )
             health = HealthService(
                 probe=repos.ping, mail=repos.mail, clock=self.clock

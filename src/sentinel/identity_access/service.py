@@ -374,7 +374,12 @@ class IdentityService:
         principal = user.to_principal(well_scope=scope)
         if user.role == HumanRole.LINKED_READER:
             # Los permisos del rol vinculado son fijos: no dependen de lo guardado.
-            principal = replace(principal, permissions=permissions_for_role(user.role.value))
+            # Lee lo que creó la cuenta vinculada, no lo que creó un administrador.
+            principal = replace(
+                principal,
+                permissions=permissions_for_role(user.role.value),
+                owner_id=user.linked_service_account_id,
+            )
         return principal
 
     async def reauthenticate(self, *, user_id: str, password: str, token_hash: str) -> None:

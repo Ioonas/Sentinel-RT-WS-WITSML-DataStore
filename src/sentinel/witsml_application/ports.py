@@ -198,6 +198,36 @@ class TrajectoryRepositoryPort(Protocol):
     ) -> None: ...
 
 
+def object_key(
+    object_type: str, uid: str, uid_well: str | None, uid_wellbore: str | None
+) -> tuple[str, str, str, str]:
+    """Clave de propiedad de un objeto. Un pozo se identifica por su propio uid."""
+    if object_type == "well":
+        return (object_type, uid, uid, "")
+    return (object_type, uid, uid_well or "", uid_wellbore or "")
+
+
+class ObjectOwnerPort(Protocol):
+    """Creador de cada objeto WITSML. ``owner_id`` nulo significa creado por un administrador."""
+
+    async def record(
+        self,
+        object_type: str,
+        uid: str,
+        uid_well: str,
+        uid_wellbore: str,
+        owner_id: str | None,
+    ) -> None: ...
+
+    async def owner_of(
+        self, object_type: str, uid: str, uid_well: str, uid_wellbore: str
+    ) -> str | None: ...
+
+    async def owned_keys(
+        self, owner_id: str
+    ) -> frozenset[tuple[str, str, str, str]]: ...
+
+
 class ChangeLogRepositoryPort(Protocol):
     async def add(self, record: ChangeLogRecord) -> None: ...
 

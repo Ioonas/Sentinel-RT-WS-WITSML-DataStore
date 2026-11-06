@@ -57,6 +57,7 @@ class ServiceAccountRecord:
             grants=self.grants,
             well_scope=self.well_scope,
             can_cascade_delete=self.can_cascade_delete,
+            owner_id=self.id,
         )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from sentinel.identity_access.domain import Principal
 from sentinel.shared.errors import NotFoundError
 from sentinel.witsml_application.domain.codes import WmlsCode
 from sentinel.witsml_application.domain.errors import WitsmlError
@@ -14,9 +15,11 @@ from sentinel.witsml_application.ports import (
     ListFilter,
     LogRepositoryPort,
     MudLogRepositoryPort,
+    ObjectOwnerPort,
     TrajectoryRepositoryPort,
     WellboreRepositoryPort,
     WellRepositoryPort,
+    object_key,
 )
 from sentinel.xml_schema import documents as xd
 from sentinel.xml_schema.objects import SUPPORTED_TYPES, spec_for
@@ -45,7 +48,9 @@ class InventoryService:
         mud_logs: MudLogRepositoryPort,
         trajectories: TrajectoryRepositoryPort,
         change_log: ChangeLogRepositoryPort,
+        object_owners: ObjectOwnerPort | None = None,
     ) -> None:
+        self._owners = object_owners
         self._wells = wells
         self._wellbores = wellbores
         self._logs = logs
@@ -62,19 +67,29 @@ class InventoryService:
         name: str | None = None,
         allowed_wells: frozenset[str] | None = None,
         limit: int = 200,
+        principal: Principal | None = None,
     ) -> list[ObjectSummary]:
         if object_type not in SUPPORTED_TYPES:
             raise NotFoundError("Tipo de objeto no soportado.")
         repo = self._repository(object_type)
+        owned = await self._owned_keys(principal)
         records = await repo.list(
             ListFilter(
                 uid_well=uid_well,
                 uid_wellbore=uid_wellbore,
                 name=name,
                 allowed_wells=allowed_wells,
-                limit=limit,
+                # Con filtro de propiedad el límite se aplica después de filtrar.
+                limit=None if owned is not None else limit,
             )
         )
+        if owned is not None:
+            records = [
+                record
+                for record in records
+                if object_key(object_type, record.uid, record.uid_well, record.uid_wellbore)
+                in owned
+            ][:limit]
         return [self._summary(object_type, record) for record in records]
 
     async def get(
@@ -84,9 +99,10 @@ class InventoryService:
         *,
         uid_well: str | None = None,
         uid_wellbore: str | None = None,
+        principal: Principal | None = None,
     ) -> ObjectSummary:
         record = await self._get(object_type, uid, uid_well, uid_wellbore)
-        if record is None:
+        if record is None or not await self._visible(principal, object_type, record):
             raise NotFoundError("Objeto no encontrado.")
         return self._summary(object_type, record)
 
@@ -97,9 +113,10 @@ class InventoryService:
         *,
         uid_well: str | None = None,
         uid_wellbore: str | None = None,
+        principal: Principal | None = None,
     ) -> list[str]:
         record = await self._get(object_type, uid, uid_well, uid_wellbore)
-        if record is None:
+        if record is None or not await self._visible(principal, object_type, record):
             raise NotFoundError("Objeto no encontrado.")
         if object_type == "well":
             children = await self._wellbores.list(ListFilter(uid_well=uid))
@@ -185,6 +202,35 @@ class InventoryService:
             "mudLog": self._mud_logs,
             "trajectory": self._trajectories,
         }[object_type]
+
+    async def _owned_keys(
+        self, principal: Principal | None
+    ) -> frozenset[tuple[str, str, str, str]] | None:
+        if principal is None or not principal.owner_scoped:
+            return None
+        if principal.owner_id is None or self._owners is None:
+            return frozenset()
+        return await self._owners.owned_keys(principal.owner_id)
+
+    async def _visible(
+        self, principal: Principal | None, object_type: str, record: StoredObject
+    ) -> bool:
+        """Pozos dentro del alcance y, con alcance por pozo, objetos creados por la cuenta."""
+        if principal is None:
+            return True
+        readable = principal.readable_wells
+        if readable is not None:
+            well = record.uid if object_type == "well" else record.uid_well
+            if well not in readable:
+                return False
+        if not principal.owner_scoped:
+            return True
+        if principal.owner_id is None or self._owners is None:
+            return False
+        owner = await self._owners.owner_of(
+            *object_key(object_type, record.uid, record.uid_well, record.uid_wellbore)
+        )
+        return owner == principal.owner_id
 
     async def _get(
         self,

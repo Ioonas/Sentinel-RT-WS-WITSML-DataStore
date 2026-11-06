@@ -593,7 +593,7 @@ export default function ServiceAccountsPage() {
               <p className={styles.faint}>
                 {editAllWells
                   ? "La cuenta ve todos los pozos, incluidos los que se creen después."
-                  : "La cuenta solo ve los pozos que ella misma crea. El alcance no se asigna a mano."}
+                  : "La cuenta solo ve los pozos y objetos que ella misma crea. El alcance no se asigna a mano."}
               </p>
             </div>
             <div className={dialogStyles.actions}>
@@ -798,7 +798,7 @@ export default function ServiceAccountsPage() {
                 <p className={styles.faint}>
                   {allWells
                     ? "La cuenta ve todos los pozos, incluidos los que se creen después."
-                    : "La cuenta solo ve los pozos que ella misma crea. Al inicio no ve ninguno."}
+                    : "La cuenta solo ve los pozos y objetos que ella misma crea. Al inicio no ve ninguno."}
                 </p>
               </div>
               <details className={styles.advanced}>
