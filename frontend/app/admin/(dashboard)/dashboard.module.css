@@ -127,6 +127,32 @@
   color: var(--color-text-muted);
 }
 
+/* Opciones avanzadas plegables dentro de un formulario. */
+.advanced {
+  border-top: 1px solid var(--color-border);
+  padding-top: 12px;
+}
+
+.advanced summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.advanced[open] summary {
+  margin-bottom: 12px;
+  color: var(--color-text);
+}
+
+/* Etiqueta de grupo dentro de formularios: frase normal, no mayúsculas. */
+.groupLabel {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
 .statValue {
   font-family: var(--font-mono);
   font-size: 1.12rem;

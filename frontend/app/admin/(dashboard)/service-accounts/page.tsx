@@ -20,6 +20,11 @@ import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
 
+const ROLE_LABELS: Record<string, string> = {
+  reader: "Solo lectura",
+  writer: "Lectura y escritura",
+};
+
 type ConfirmRequest = {
   title: string;
   description: string;
@@ -327,7 +332,7 @@ export default function ServiceAccountsPage() {
               </Select>
             </Field>
             <div>
-              <span className={styles.statLabel}>Permisos</span>
+              <span className={styles.groupLabel}>Permisos</span>
               <GrantEditor grants={editGrants} onChange={setEditGrants} />
             </div>
             <WellPicker value={editWells} onChange={setEditWells} />
@@ -428,7 +433,7 @@ export default function ServiceAccountsPage() {
                           <td>
                             <strong>{account.name}</strong>
                           </td>
-                          <td>{account.role}</td>
+                          <td>{ROLE_LABELS[account.role] ?? account.role}</td>
                           <td>
                             <Tags values={account.grants.map(grantLabel)} />
                           </td>
@@ -438,19 +443,15 @@ export default function ServiceAccountsPage() {
                           <td>
                             <div className={styles.stack}>
                               <StatusBadge
-                                status={account.enabled ? "ok" : "danger"}
-                                label={account.enabled ? "Activa" : "Deshabilitada"}
+                                status={account.archived_at ? "neutral" : account.enabled ? "ok" : "danger"}
+                                label={account.archived_at ? "Archivada" : account.enabled ? "Activa" : "Deshabilitada"}
                               />
-                              <StatusBadge
-                                status={account.can_cascade_delete ? "warn" : "neutral"}
-                                label={account.can_cascade_delete ? "Borrado en cascada" : "Sin borrado en cascada"}
-                              />
-                              {account.archived_at ? (
-                                <StatusBadge status="neutral" label={`Archivada ${formatDateTime(account.archived_at)}`} />
+                              {account.can_cascade_delete ? (
+                                <span className={styles.faint}>Puede borrar en cascada</span>
                               ) : null}
                               {account.replaced_by_id ? (
                                 <span className={styles.faint}>
-                                  Reemplazada por {account.replaced_by_id}
+                                  Reemplazada por {data?.find((other) => other.id === account.replaced_by_id)?.name ?? "otra cuenta"}
                                   {account.replacement_expires_at
                                     ? ` · vence ${formatDateTime(account.replacement_expires_at)}`
                                     : ""}
@@ -514,18 +515,21 @@ export default function ServiceAccountsPage() {
                   onChange={(event) => setName(event.target.value)}
                 />
               </Field>
-              <Field label="Rol" htmlFor="account-role">
+              <Field label="Rol" htmlFor="account-role" hint="Solo lectura consulta el Store; lectura y escritura también puede modificarlo.">
                 <Select id="account-role" value={role} onChange={(event) => setRole(event.target.value)}>
-                  <option value="reader">reader</option>
-                  <option value="writer">writer</option>
+                  <option value="reader">Solo lectura</option>
+                  <option value="writer">Lectura y escritura</option>
                 </Select>
               </Field>
               <div>
-                <span className={styles.statLabel}>Permisos</span>
+                <span className={styles.groupLabel}>Permisos</span>
                 <GrantEditor grants={grants} onChange={setGrants} />
               </div>
               <WellPicker value={selectedWells} onChange={setSelectedWells} />
-              <label className={styles.statLabel}>
+              <details className={styles.advanced}>
+                <summary>Opciones avanzadas</summary>
+                <div className={styles.form}>
+              <label className={styles.groupLabel}>
                 <input
                   type="checkbox"
                   checked={cascade}
@@ -589,6 +593,8 @@ export default function ServiceAccountsPage() {
                   />
                 </Field>
               ) : null}
+                </div>
+              </details>
               <Button type="submit" variant="primary" disabled={busy}>
                 {busy ? "Creando…" : "Crear cuenta"}
               </Button>

@@ -13,13 +13,25 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { EmptyRow, Section, Tags } from "@/components/dashboard";
+import { ActionMenu } from "@/components/ActionMenu";
+import { ModalDialog } from "@/components/Dialog";
 import { ApiError, api, type MessageView, type ObjectView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import { useReauth } from "@/components/Reauth";
+import dialogStyles from "@/components/Dialog.module.css";
 import styles from "../dashboard.module.css";
 
 const OBJECT_TYPES = ["well", "wellbore", "log", "mudLog", "trajectory"] as const;
+
+/** Nombres en español para los tipos WITSML; el valor técnico sigue siendo el de la API. */
+const OBJECT_TYPE_LABELS: Record<string, string> = {
+  well: "Pozo",
+  wellbore: "Pozo lateral",
+  log: "Registro",
+  mudLog: "Registro de lodo",
+  trajectory: "Trayectoria",
+};
 
 function objectPath(type: string, uid: string, uidWell?: string | null, uidWellbore?: string | null) {
   const params = new URLSearchParams();
@@ -168,7 +180,7 @@ export default function ObjectsPage() {
       <PageHeader
         title="Objetos WITSML"
         description="Inventario de pozos, sondeos, registros y trayectorias. El borrado nunca es en cascada."
-        actions={<StatusBadge status="neutral" label={objectType} />}
+        actions={<StatusBadge status="neutral" label={OBJECT_TYPE_LABELS[objectType] ?? objectType} />}
       />
 
       {message ? <Alert tone="ok">{message}</Alert> : null}
@@ -186,19 +198,19 @@ export default function ObjectsPage() {
               >
                 {OBJECT_TYPES.map((type) => (
                   <option key={type} value={type}>
-                    {type}
+                    {OBJECT_TYPE_LABELS[type]}
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="uidWell" htmlFor="object-well">
+            <Field label="Pozo (uidWell)" htmlFor="object-well" hint="Opcional. Limita la búsqueda a un pozo.">
               <Input
                 id="object-well"
                 value={uidWell}
                 onChange={(event) => setUidWell(event.target.value)}
               />
             </Field>
-            <Field label="uidWellbore" htmlFor="object-wellbore">
+            <Field label="Pozo lateral (uidWellbore)" htmlFor="object-wellbore" hint="Opcional.">
               <Input
                 id="object-wellbore"
                 value={uidWellbore}
@@ -325,7 +337,7 @@ export default function ObjectsPage() {
                           <td>
                             <StatusBadge
                               status={item.growing ? "warn" : "neutral"}
-                              label={item.growing ? "growing" : "estable"}
+                              label={item.growing ? "En crecimiento" : "Estable"}
                             />
                           </td>
                           <td>
@@ -333,12 +345,14 @@ export default function ObjectsPage() {
                               <Button size="sm" onClick={() => inspect(item)}>
                                 Ver
                               </Button>
-                              <Button size="sm" variant="ghost" onClick={() => loadDependencies(item)}>
-                                Dependencias
-                              </Button>
-                              <Button size="sm" variant="danger" onClick={() => startDelete(item)}>
-                                Eliminar
-                              </Button>
+                              <ActionMenu
+                                label="Más acciones"
+                                subject={item.name || item.uid}
+                                items={[
+                                  { label: "Ver dependencias", onSelect: () => loadDependencies(item) },
+                                  { label: "Eliminar objeto", danger: true, onSelect: () => startDelete(item) },
+                                ]}
+                              />
                             </div>
                           </td>
                         </tr>
@@ -360,7 +374,7 @@ export default function ObjectsPage() {
             {detail ? (
               <dl className={styles.detailsGrid}>
                 <dt>Tipo</dt>
-                <dd>{detail.object_type}</dd>
+                <dd>{OBJECT_TYPE_LABELS[detail.object_type] ?? detail.object_type}</dd>
                 <dt>uid</dt>
                 <dd className={styles.wrap}>{detail.uid}</dd>
                 <dt>Nombre</dt>
@@ -373,8 +387,8 @@ export default function ObjectsPage() {
                 <dd>{formatDateTime(detail.created_at)}</dd>
                 <dt>Cambiado</dt>
                 <dd>{formatDateTime(detail.changed_at)}</dd>
-                <dt>growing</dt>
-                <dd>{detail.growing ? "sí" : "no"}</dd>
+                <dt>En crecimiento</dt>
+                <dd>{detail.growing ? "Sí" : "No"}</dd>
                 <dt>Dependencias</dt>
                 <dd>
                   {dependencies ? <Tags values={dependencies} /> : <span className={styles.faint}>Pulse “Dependencias”.</span>}
@@ -388,51 +402,54 @@ export default function ObjectsPage() {
       </div>
 
       {deleteTarget ? (
-        <Card>
-          <Section
-            title={`Eliminar ${deleteTarget.object_type} ${deleteTarget.uid}`}
-            description="La eliminación es lógica, se registra en ChangeLog y exige confirmación exacta del uid."
-            actions={
-              <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(null)}>
+        <ModalDialog
+          titleId="delete-object-title"
+          descriptionId="delete-object-description"
+          role="alertdialog"
+          tone="danger"
+          busy={deleteBusy}
+          onClose={() => setDeleteTarget(null)}
+        >
+          <h2 id="delete-object-title" className={dialogStyles.title}>
+            Eliminar {(OBJECT_TYPE_LABELS[deleteTarget.object_type] ?? deleteTarget.object_type).toLowerCase()} {deleteTarget.uid}
+          </h2>
+          <p id="delete-object-description" className={dialogStyles.text}>
+            El objeto se marca como eliminado, no se borra físicamente. Queda registrado en ChangeLog. Para confirmar, escriba su uid completo.
+          </p>
+          <form className={dialogStyles.form} onSubmit={remove}>
+            <Field label="Motivo" htmlFor="delete-reason" hint="Mínimo 5 caracteres.">
+              <Input
+                id="delete-reason"
+                data-initial-focus
+                required
+                minLength={5}
+                maxLength={500}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </Field>
+            <Field label="uid del objeto" htmlFor="delete-confirmation" hint={`Escriba exactamente: ${deleteTarget.uid}`}>
+              <Input
+                id="delete-confirmation"
+                required
+                value={confirmation}
+                onChange={(event) => setConfirmation(event.target.value)}
+              />
+            </Field>
+            <div className={dialogStyles.actions}>
+              <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>
                 Cancelar
               </Button>
-            }
-          >
-            <form className={styles.form} onSubmit={remove}>
-              <Field label="Motivo" htmlFor="delete-reason" hint="Mínimo 5 caracteres.">
-                <Input
-                  id="delete-reason"
-                  required
-                  minLength={5}
-                  maxLength={500}
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                />
-              </Field>
-              <Field
-                label="Confirmación"
-                hint={`Escriba exactamente: ${deleteTarget.uid}`}
-                htmlFor="delete-confirmation"
+              <Button
+                type="submit"
+                variant="danger"
+                disabled={deleteBusy || confirmation !== deleteTarget.uid || reason.trim().length < 5}
               >
-                <Input
-                  id="delete-confirmation"
-                  required
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
-              </Field>
-              <div className={styles.actions}>
-                <Button
-                  type="submit"
-                  variant="danger"
-                  disabled={deleteBusy || confirmation !== deleteTarget.uid}
-                >
-                  {deleteBusy ? "Eliminando…" : "Eliminar objeto"}
-                </Button>
-              </div>
-            </form>
-          </Section>
-        </Card>
+                {deleteBusy ? "Eliminando…" : "Eliminar objeto"}
+              </Button>
+            </div>
+          </form>
+        </ModalDialog>
       ) : null}
     </div>
   );
