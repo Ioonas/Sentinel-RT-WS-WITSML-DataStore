@@ -51,6 +51,7 @@ export default function ObjectsPage() {
 
   const profile = useApiQuery<SessionView>("/profile");
   const canCreate = profile.data?.user.permissions.includes("admin.objects.write") ?? false;
+  const canDelete = profile.data?.user.permissions.includes("admin.objects.delete") ?? false;
   const wellOptions = useApiQuery<ObjectView[]>(
     canCreate ? "/objects?objectType=well&limit=1000" : null,
   );
@@ -355,7 +356,9 @@ export default function ObjectsPage() {
                                 subject={item.name || item.uid}
                                 items={[
                                   { label: "Ver dependencias", onSelect: () => loadDependencies(item) },
-                                  { label: "Eliminar objeto", danger: true, onSelect: () => startDelete(item) },
+                                  ...(canDelete
+                                    ? [{ label: "Eliminar objeto", danger: true, onSelect: () => startDelete(item) }]
+                                    : []),
                                 ]}
                               />
                             </div>

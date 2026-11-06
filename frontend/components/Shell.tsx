@@ -30,8 +30,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const items = linked ? NAV.filter((item) => LINKED_NAV_HREFS.has(item.href)) : NAV;
 
   useEffect(() => {
-    // Una persona vinculada no tiene resumen: se lleva a sus objetos.
-    if (linked && (pathname === "/admin/overview" || pathname === "/admin")) {
+    // Una persona vinculada solo accede a sus objetos y a su cuenta; cualquier otra ruta
+    // (incluida una escrita a mano en la URL) se lleva a Objetos.
+    if (linked && !LINKED_NAV_HREFS.has(pathname)) {
       router.replace("/admin/objects");
     }
   }, [linked, pathname, router]);
