@@ -34,7 +34,7 @@ from sentinel.admin_api.schemas import (
 )
 from sentinel.audit_config.domain import AuditChannel, AuditResult
 from sentinel.bootstrap.container import RequestServices
-from sentinel.identity_access.domain import ALL_ADMIN_PERMISSIONS
+from sentinel.identity_access.domain import ALL_ADMIN_PERMISSIONS, HumanRole
 from sentinel.identity_access.service import session_reference
 from sentinel.shared.errors import AuthenticationError
 
@@ -252,6 +252,7 @@ async def get_profile(
         user=user_view(user),
         expires_at=auth.session.expires_at,
         linked_service_account=account.name if account is not None else None,
+        is_linked=user.role == HumanRole.LINKED_READER,
         linked_account=LinkedAccountView(
             name=account.name,
             role=account.role.value,

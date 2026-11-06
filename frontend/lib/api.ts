@@ -97,6 +97,8 @@ export type SessionView = {
   linked_service_account?: string | null;
   /** Solo acceso web vinculado: datos de la cuenta de servicio vinculada. */
   linked_account?: LinkedAccountView | null;
+  /** Rol de lector vinculado: aplica la restricción aunque falte la cuenta de servicio. */
+  is_linked?: boolean;
   /** Permisos efectivos de la sesión (ver lib/permissions.ts). */
   permissions: string[];
   is_superadmin: boolean;

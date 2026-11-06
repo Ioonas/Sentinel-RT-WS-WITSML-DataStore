@@ -210,7 +210,7 @@ export default function ProfilePage() {
                 <dt>Correo</dt>
                 <dd>{user.email}</dd>
                 <dt>Rol</dt>
-                <dd>{data?.linked_account ? "Lector vinculado" : user.role}</dd>
+                <dd>{data?.is_linked ? "Lector vinculado" : user.role}</dd>
                 <dt>Estado</dt>
                 <dd>
                   <StatusBadge status={user.enabled ? "ok" : "danger"} label={user.enabled ? "Activo" : "Deshabilitado"} />
@@ -230,6 +230,13 @@ export default function ProfilePage() {
           </Card>
 
           {data?.linked_account ? <LinkedAccountCard account={data.linked_account} /> : null}
+          {data?.is_linked && !data.linked_account ? (
+            <Card>
+              <Alert tone="warn">
+                No se encontró la cuenta de servicio vinculada a su acceso. Pida a un administrador revisar el vínculo.
+              </Alert>
+            </Card>
+          ) : null}
 
           <Card>
             <Section

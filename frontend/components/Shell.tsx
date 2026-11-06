@@ -29,7 +29,7 @@ const LINKED_NAV_HREFS = new Set(["/admin/objects", "/admin/profile"]);
 
 function allowedNav(session: SessionView | null | undefined): NavItem[] {
   if (!session) return [];
-  const linked = Boolean(session.linked_service_account);
+  const linked = Boolean(session.is_linked || session.linked_service_account);
   return NAV.filter(
     (item) =>
       (!linked || LINKED_NAV_HREFS.has(item.href)) &&

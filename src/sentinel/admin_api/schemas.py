@@ -56,6 +56,9 @@ class SessionView(BaseModel):
     # Solo para acceso web vinculado: cuenta de servicio cuyos datos se ven.
     linked_service_account: str | None = None
     linked_account: LinkedAccountView | None = None
+    # Según el rol: una persona con rol de lector vinculado se restringe aunque su cuenta
+    # de servicio no se encuentre (falla cerrada).
+    is_linked: bool = False
     # Permisos efectivos de la sesión (el superadministrador los tiene todos).
     permissions: list[str] = []
     is_superadmin: bool = False
