@@ -13,6 +13,7 @@ del producto y **no** modifica los scripts de prueba ni los esquemas oficiales.
 - Base de datos dedicada al ensayo. `load_data_set.exe` **escribe** el dataset
   estándar (pozos `Energistics-*`), así que no debe apuntarse a producción.
 - Una cuenta de servicio WMLS con permisos `read`/`write`/`delete` sobre `*` y con permiso de borrado en cascada (`can_cascade_delete = true`). El permiso de cascada se fija al crear la cuenta y no se puede cambiar después.
+- La cuenta de certificación debe quedar **sin alcance por pozo** (todos los pozos). Sin `well_scope` en la petición, la API lo deja sin restricción. Las pruebas leen y borran pozos que no crea la cuenta (el dataset estándar y los objetos del `data_grower_script`), así que con alcance acotado fallarían. Desde la interfaz hay que marcar "Acceso a todos los pozos".
 
 ## 1. Preparar la cuenta de servicio
 

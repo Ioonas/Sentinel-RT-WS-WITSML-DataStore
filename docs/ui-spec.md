@@ -218,8 +218,8 @@ El diálogo no debe almacenar la contraseña ni reutilizarla para otras acciones
 **Contenido**
 
 - Lista con nombre, rol, estado, alcance por pozo y última utilización.
-- Alta con rol `reader`/`writer`, permisos por tipo de objeto y alcance
-  opcional por pozo.
+- Alta con rol `reader`/`writer`, permisos por tipo de objeto y alcance:
+  por defecto, solo los pozos que la cuenta crea; o todos los pozos.
 - Edición de permisos y estado.
 - Rotación y revocación de credencial.
 
@@ -229,8 +229,9 @@ El diálogo no debe almacenar la contraseña ni reutilizarla para otras acciones
   recargar.
 - No se muestran hashes, tokens ni credenciales anteriores.
 - Una cuenta deshabilitada conserva su historial pero no puede autenticarse.
-- El alcance por pozo se presenta como lista de UID de pozo; vacío significa
-  todos los pozos permitidos por los grants.
+- El alcance por pozo se presenta como lista de UID de pozo. Vacío significa
+  solo los pozos que la cuenta crea; "todos los pozos" se guarda como alcance
+  sin restricción (`null`).
 
 ### 7.4 Usuarios administrativos (`/admin/admin-users`)
 

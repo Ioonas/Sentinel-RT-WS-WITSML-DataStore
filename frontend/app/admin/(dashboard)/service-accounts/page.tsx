@@ -52,7 +52,6 @@ export default function ServiceAccountsPage() {
   const [grants, setGrants] = useState<Grant[]>([
     { object_type: "*", action: "read", uid_well: null },
   ]);
-  const [selectedWells, setSelectedWells] = useState<string[]>([]);
   const [allWells, setAllWells] = useState(false);
   const [cascade, setCascade] = useState(false);
   const [replacesId, setReplacesId] = useState("");
@@ -96,8 +95,8 @@ export default function ServiceAccountsPage() {
             name,
             role,
             grants,
-            // null = todos los pozos; lista vacía = ningún pozo (valor por defecto).
-            well_scope: allWells ? null : selectedWells,
+            // null = todos los pozos; lista vacía = solo los pozos que la cuenta cree.
+            well_scope: allWells ? null : [],
             can_cascade_delete: cascade,
             replaces_account_id: replacesId || null,
             replacement_grace_days: replacesId ? Number(graceDays) : undefined,
@@ -107,7 +106,6 @@ export default function ServiceAccountsPage() {
       );
       setCreated(result);
       setName("");
-      setSelectedWells([]);
       setAllWells(false);
       setCascade(false);
       setReplacesId("");
@@ -538,9 +536,8 @@ export default function ServiceAccountsPage() {
                 <p className={styles.faint}>
                   {allWells
                     ? "La cuenta ve todos los pozos, incluidos los que se creen después."
-                    : "Sin pozos seleccionados, la cuenta no ve datos. Puede crear pozos nuevos si tiene escritura global, y cada uno queda dentro de su alcance."}
+                    : "La cuenta solo ve los pozos que ella misma crea. Al inicio no ve ninguno."}
                 </p>
-                {allWells ? null : <WellPicker value={selectedWells} onChange={setSelectedWells} />}
               </div>
               <details className={styles.advanced}>
                 <summary>Opciones avanzadas</summary>
