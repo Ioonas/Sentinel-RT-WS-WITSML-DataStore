@@ -179,6 +179,18 @@ class WebAccessUserView(BaseModel):
     enabled: bool
 
 
+class WebAccessInvitationView(BaseModel):
+    id: str
+    email: str
+    created_at: datetime | None = None
+    expires_at: datetime
+
+
+class WebAccessListView(BaseModel):
+    users: list[WebAccessUserView]
+    invitations: list[WebAccessInvitationView]
+
+
 class InvitationSummaryView(BaseModel):
     id: str
     email: str

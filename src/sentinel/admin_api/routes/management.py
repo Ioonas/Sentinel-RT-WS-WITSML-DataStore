@@ -42,7 +42,9 @@ from sentinel.admin_api.schemas import (
     ServiceAccountView,
     ServiceInfoUpdateRequest,
     UserView,
+    WebAccessInvitationView,
     WebAccessInviteRequest,
+    WebAccessListView,
     WebAccessUserView,
 )
 from sentinel.audit_config.domain import AuditEvent, ServerConfig
@@ -744,23 +746,34 @@ async def mail_outbox_status(
 
 @router.get(
     "/service-accounts/{account_id}/web-access",
-    response_model=list[WebAccessUserView],
+    response_model=WebAccessListView,
 )
 async def list_web_access(
     account_id: str,
     _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
     services: RequestServices = Depends(get_services),
-) -> list[WebAccessUserView]:
-    users = await services.identities.list_web_access(account_id)
-    return [
-        WebAccessUserView(
-            id=user.id,
-            email=user.email,
-            display_name=user.display_name,
-            enabled=user.enabled,
-        )
-        for user in users
-    ]
+) -> WebAccessListView:
+    users, pending = await services.identities.list_web_access(account_id)
+    return WebAccessListView(
+        users=[
+            WebAccessUserView(
+                id=user.id,
+                email=user.email,
+                display_name=user.display_name,
+                enabled=user.enabled,
+            )
+            for user in users
+        ],
+        invitations=[
+            WebAccessInvitationView(
+                id=item.id,
+                email=item.email,
+                created_at=item.created_at,
+                expires_at=item.expires_at,
+            )
+            for item in pending
+        ],
+    )
 
 
 @router.post(

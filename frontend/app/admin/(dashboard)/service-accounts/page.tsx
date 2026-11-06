@@ -16,6 +16,8 @@ import {
   type InvitationView,
   type MessageView,
   type ServiceAccountView,
+  type WebAccessInvitationView,
+  type WebAccessListView,
   type WebAccessUserView,
 } from "@/lib/api";
 import { WellPicker } from "@/components/WellPicker";
@@ -73,6 +75,8 @@ export default function ServiceAccountsPage() {
   const [webError, setWebError] = useState<string | null>(null);
   const [webMessage, setWebMessage] = useState<string | null>(null);
   const [webRemoving, setWebRemoving] = useState<WebAccessUserView | null>(null);
+  const [webInvitations, setWebInvitations] = useState<WebAccessInvitationView[]>([]);
+  const [webCancelling, setWebCancelling] = useState<WebAccessInvitationView | null>(null);
   const [rotateCredential, setRotateCredential] = useState("");
   const [rotateConfirm, setRotateConfirm] = useState("");
   const [rotateBusy, setRotateBusy] = useState(false);
@@ -268,7 +272,9 @@ export default function ServiceAccountsPage() {
 
   async function loadWebAccess(account: ServiceAccountView) {
     try {
-      setWebUsers(await api<WebAccessUserView[]>(`/service-accounts/${account.id}/web-access`));
+      const result = await api<WebAccessListView>(`/service-accounts/${account.id}/web-access`);
+      setWebUsers(result.users);
+      setWebInvitations(result.invitations);
     } catch (caught) {
       setWebError(caught instanceof ApiError ? caught.message : "No se pudieron cargar las personas con acceso.");
     }
@@ -280,6 +286,7 @@ export default function ServiceAccountsPage() {
     setWebError(null);
     setWebMessage(null);
     setWebUsers([]);
+    setWebInvitations([]);
     void loadWebAccess(account);
   }
 
@@ -303,8 +310,43 @@ export default function ServiceAccountsPage() {
       );
       setWebMessage(`Invitación enviada a ${invitation.email}. Vence en 72 horas.`);
       setWebEmail("");
+      await loadWebAccess(webAccount);
     } catch (caught) {
       setWebError(caught instanceof ApiError ? caught.message : "No se pudo crear la invitación.");
+    } finally {
+      setWebBusy(false);
+    }
+  }
+
+  async function resendWebInvitation(item: WebAccessInvitationView) {
+    if (!webAccount) return;
+    setWebBusy(true);
+    setWebError(null);
+    setWebMessage(null);
+    try {
+      const result = await runWithReauth(() =>
+        api<InvitationView>(`/invitations/${item.id}/resend`, { method: "POST" }),
+      );
+      setWebMessage(`Invitación reenviada a ${result.email}. La anterior dejó de ser válida.`);
+      await loadWebAccess(webAccount);
+    } catch (caught) {
+      setWebError(caught instanceof ApiError ? caught.message : "No se pudo reenviar la invitación.");
+    } finally {
+      setWebBusy(false);
+    }
+  }
+
+  async function cancelWebInvitation() {
+    if (!webAccount || !webCancelling) return;
+    setWebBusy(true);
+    setWebError(null);
+    try {
+      await runWithReauth(() => api(`/invitations/${webCancelling.id}/revoke`, { method: "POST" }));
+      setWebMessage(`Invitación cancelada para ${webCancelling.email}.`);
+      setWebCancelling(null);
+      await loadWebAccess(webAccount);
+    } catch (caught) {
+      setWebError(caught instanceof ApiError ? caught.message : "No se pudo cancelar la invitación.");
     } finally {
       setWebBusy(false);
     }
@@ -350,6 +392,39 @@ export default function ServiceAccountsPage() {
             {webError ? <Alert>{webError}</Alert> : null}
             {webMessage ? <Alert tone="ok">{webMessage}</Alert> : null}
             <div className={styles.stack}>
+              <span className={styles.groupLabel}>Invitaciones pendientes</span>
+              {webInvitations.length > 0 ? (
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <tbody>
+                      {webInvitations.map((item) => {
+                        const expired = new Date(item.expires_at).getTime() < Date.now();
+                        return (
+                          <tr key={item.id}>
+                            <td className={styles.wrap}>{item.email}</td>
+                            <td>
+                              <StatusBadge status={expired ? "danger" : "neutral"} label={expired ? "Vencida" : "Pendiente"} />
+                            </td>
+                            <td className={styles.faint}>Vence {formatDateTime(item.expires_at)}</td>
+                            <td>
+                              <div className={styles.actions}>
+                                <Button size="sm" disabled={webBusy} onClick={() => void resendWebInvitation(item)}>
+                                  Reenviar
+                                </Button>
+                                <Button size="sm" variant="danger" disabled={webBusy} onClick={() => setWebCancelling(item)}>
+                                  Cancelar invitación
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className={styles.faint}>No hay invitaciones pendientes.</p>
+              )}
               <span className={styles.groupLabel}>Personas con acceso</span>
               {webUsers.length > 0 ? (
                 <div className={styles.tableWrap}>
@@ -399,6 +474,17 @@ export default function ServiceAccountsPage() {
               </div>
             </form>
           </ModalDialog>
+          {webCancelling ? (
+            <ConfirmDialog
+              title="Cancelar invitación"
+              description={`La invitación enviada a ${webCancelling.email} dejará de ser válida.`}
+              confirmLabel="Cancelar invitación"
+              tone="danger"
+              busy={webBusy}
+              onConfirm={() => void cancelWebInvitation()}
+              onCancel={() => setWebCancelling(null)}
+            />
+          ) : null}
           {webRemoving ? (
             <ConfirmDialog
               title="Quitar acceso web"

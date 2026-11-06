@@ -547,6 +547,10 @@ class IdentityService:
             raise ValidationError("El correo no tiene un formato válido.")
         if await self._repo.get_admin_user_by_email(normalized) is not None:
             raise ConflictError("Ya existe un usuario con ese correo.")
+        if any(item.email == normalized for item in await self._repo.list_pending_invitations()):
+            raise ConflictError(
+                "Ya hay una invitación pendiente para ese correo. Reénviela o cancélela."
+            )
         return await self._issue_invitation(
             email=normalized,
             role=HumanRole.LINKED_READER,
@@ -561,10 +565,19 @@ class IdentityService:
         account = await self._repo.get_service_account(user.linked_service_account_id)
         return account.name if account is not None else None
 
-    async def list_web_access(self, account_id: str) -> list[AdminUserRecord]:
+    async def list_web_access(
+        self, account_id: str
+    ) -> tuple[list[AdminUserRecord], list[InvitationRecord]]:
+        """Personas con acceso y las invitaciones pendientes vinculadas a la cuenta."""
         if await self._repo.get_service_account(account_id) is None:
             raise NotFoundError("Cuenta de servicio no encontrada.")
-        return await self._repo.list_admin_users_linked_to(account_id)
+        users = await self._repo.list_admin_users_linked_to(account_id)
+        pending = [
+            item
+            for item in await self._repo.list_pending_invitations()
+            if item.linked_service_account_id == account_id
+        ]
+        return users, pending
 
     async def remove_web_access(self, *, account_id: str, user_id: str) -> AdminUserRecord:
         """Desvincula a la persona: deja de ver pozos y se cierran sus sesiones."""

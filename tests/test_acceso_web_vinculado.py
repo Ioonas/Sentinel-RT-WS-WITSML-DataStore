@@ -45,7 +45,15 @@ async def test_web_access_requires_a_scoped_account(admin_client: AsyncClient, c
         f"/admin-api/v1/service-accounts/{scoped}/web-access",
     )
     assert listed.status_code == 200, listed.text
-    assert listed.json() == []
+    assert listed.json()["users"] == []
+    assert [item["email"] for item in listed.json()["invitations"]] == ["ana@example.mx"]
+
+    duplicated = await admin_client.post(
+        f"/admin-api/v1/service-accounts/{scoped}/web-access",
+        headers={"x-csrf-token": csrf},
+        json={"email": "ana@example.mx"},
+    )
+    assert duplicated.status_code == 409, duplicated.text
 
 
 async def test_linked_role_cannot_be_granted_by_plain_invitation(

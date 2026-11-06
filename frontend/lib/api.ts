@@ -94,6 +94,18 @@ export type WebAccessUserView = {
   enabled: boolean;
 };
 
+export type WebAccessInvitationView = {
+  id: string;
+  email: string;
+  created_at: string | null;
+  expires_at: string;
+};
+
+export type WebAccessListView = {
+  users: WebAccessUserView[];
+  invitations: WebAccessInvitationView[];
+};
+
 export type ProfileSessionView = {
   reference: string;
   created_at: string;
