@@ -82,6 +82,14 @@ export type UserView = {
 
 export type SessionView = { user: UserView; expires_at: string | null };
 
+export type ProfileSessionView = {
+  reference: string;
+  created_at: string;
+  authenticated_at: string;
+  expires_at: string;
+  current: boolean;
+};
+
 export type ServerConfigView = {
   contact_name: string;
   contact_email: string;

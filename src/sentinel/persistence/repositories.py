@@ -1203,6 +1203,47 @@ class SqlAlchemyIdentityRepository:
             .values(revoked_at=revoked_at)
         )
 
+    async def list_user_sessions(self, user_id: str, now: datetime) -> list[SessionRecord]:
+        rows = (
+            await self._session.scalars(
+                select(AdminSessionRow)
+                .where(
+                    AdminSessionRow.user_id == user_id,
+                    AdminSessionRow.revoked_at.is_(None),
+                    AdminSessionRow.expires_at > now,
+                )
+                .order_by(AdminSessionRow.authenticated_at.desc())
+            )
+        ).all()
+        return [
+            SessionRecord(
+                token_hash=row.token_hash,
+                user_id=row.user_id,
+                csrf_token=row.csrf_token,
+                created_at=row.created_at,
+                expires_at=row.expires_at,
+                authenticated_at=row.authenticated_at,
+                revoked_at=row.revoked_at,
+            )
+            for row in rows
+        ]
+
+    async def revoke_other_user_sessions(
+        self, user_id: str, keep_token_hash: str, revoked_at: datetime
+    ) -> int:
+        result = await self._session.execute(
+            update(AdminSessionRow)
+            .where(
+                AdminSessionRow.user_id == user_id,
+                AdminSessionRow.revoked_at.is_(None),
+                # Solo sesiones activas: las vencidas no se cuentan ni se "cierran".
+                AdminSessionRow.expires_at > revoked_at,
+                AdminSessionRow.token_hash != keep_token_hash,
+            )
+            .values(revoked_at=revoked_at)
+        )
+        return int(result.rowcount or 0)
+
     async def save_invitation(self, invitation: InvitationRecord) -> None:
         self._session.add(
             InvitationRow(

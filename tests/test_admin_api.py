@@ -243,6 +243,66 @@ async def test_invitation_can_be_revoked_and_resent(
     assert resend_revoked.status_code == 409
 
 
+async def test_profile_sessions_protect_current_session(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    headers = {"x-csrf-token": csrf}
+    listed = await admin_client.get("/admin-api/v1/profile/sessions")
+    assert listed.status_code == 200, listed.text
+    current = [item for item in listed.json() if item["current"]]
+    assert len(current) == 1
+
+    own = await admin_client.delete(
+        f"/admin-api/v1/profile/sessions/{current[0]['reference']}", headers=headers
+    )
+    assert own.status_code == 409
+
+    missing = await admin_client.delete(
+        "/admin-api/v1/profile/sessions/no-existe", headers=headers
+    )
+    assert missing.status_code == 404
+
+    others = await admin_client.post(
+        "/admin-api/v1/profile/sessions/revoke-others", headers=headers
+    )
+    assert others.status_code == 200, others.text
+
+    # La sesión actual sigue activa tras cerrar las demás.
+    profile = await admin_client.get("/admin-api/v1/profile")
+    assert profile.status_code == 200
+
+
+async def test_archived_service_accounts_listed_only_on_request(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    headers = {"x-csrf-token": csrf}
+    created = await admin_client.post(
+        "/admin-api/v1/service-accounts",
+        headers=headers,
+        json={
+            "name": "acme.archivado",
+            "role": "reader",
+            "grants": [{"object_type": "*", "action": "read"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    account_id = created.json()["account"]["id"]
+    archived = await admin_client.post(
+        f"/admin-api/v1/service-accounts/{account_id}/archive", headers=headers
+    )
+    assert archived.status_code == 200, archived.text
+
+    default = await admin_client.get("/admin-api/v1/service-accounts")
+    assert all(item["id"] != account_id for item in default.json())
+
+    full = await admin_client.get(
+        "/admin-api/v1/service-accounts", params={"include_archived": "true"}
+    )
+    assert full.status_code == 200
+    match = [item for item in full.json() if item["id"] == account_id]
+    assert len(match) == 1 and match[0]["archived_at"] is not None
+
+
 async def test_roles_permissions_and_audit(admin_client: AsyncClient) -> None:
     roles = await admin_client.get("/admin-api/v1/roles")
     assert roles.status_code == 200

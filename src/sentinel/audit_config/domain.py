@@ -79,3 +79,4 @@ class MailJob:
 class MailKind(StrEnum):
     INVITATION = "invitation"
     RECOVERY = "recovery"
+    SESSIONS_CLOSED = "sessions_closed"

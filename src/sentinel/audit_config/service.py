@@ -252,6 +252,22 @@ class MailService:
             )
         )
 
+    async def enqueue_sessions_closed(self, recipient: str, closed: int) -> None:
+        await self._outbox.enqueue(
+            MailJob(
+                id=self._ids.new_uid(),
+                kind=MailKind.SESSIONS_CLOSED.value,
+                recipient=recipient,
+                subject="Sesiones cerradas - Sentinel RT&WS WITSML DataStore",
+                body=(
+                    f"Se cerraron {closed} sesión(es) activa(s) de su cuenta de administración.\n"
+                    "Si no reconoce esta acción, cambie su contraseña "
+                    "y avise a un superadministrador.\n"
+                ),
+                created_at=self._clock.now(),
+            )
+        )
+
     async def enqueue_recovery(self, recipient: str, token: str) -> None:
         link = f"{self._base}/admin/reset-password?token={token}"
         await self._outbox.enqueue(

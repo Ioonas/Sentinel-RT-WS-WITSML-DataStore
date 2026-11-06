@@ -21,6 +21,7 @@ from sentinel.admin_api.schemas import (
     LoginRequest,
     MessageView,
     PasswordChangeRequest,
+    ProfileSessionView,
     ReauthRequest,
     RecoveryRequest,
     ResetPasswordRequest,
@@ -31,6 +32,7 @@ from sentinel.admin_api.schemas import (
 )
 from sentinel.audit_config.domain import AuditChannel, AuditResult
 from sentinel.bootstrap.container import RequestServices
+from sentinel.identity_access.service import session_reference
 from sentinel.shared.errors import AuthenticationError
 
 router = APIRouter(tags=["Sesión administrativa"])
@@ -242,6 +244,74 @@ async def get_profile(
 ) -> SessionView:
     user = await services.identities.get_admin_user(auth.principal.id)
     return SessionView(user=user_view(user), expires_at=auth.session.expires_at)
+
+
+async def _notify_sessions_closed(services: RequestServices, user_id: str, closed: int) -> None:
+    user = await services.identities.get_admin_user(user_id)
+    await services.mail.enqueue_sessions_closed(user.email, closed)
+
+
+@router.get("/profile/sessions", response_model=list[ProfileSessionView])
+async def list_profile_sessions(
+    auth: AuthContext = Depends(get_auth),
+    services: RequestServices = Depends(get_services),
+) -> list[ProfileSessionView]:
+    sessions = await services.identities.list_own_sessions(auth.principal.id)
+    return [
+        ProfileSessionView(
+            reference=session_reference(item.token_hash),
+            created_at=item.created_at,
+            authenticated_at=item.authenticated_at,
+            expires_at=item.expires_at,
+            current=item.token_hash == auth.session.token_hash,
+        )
+        for item in sessions
+    ]
+
+
+@router.delete("/profile/sessions/{reference}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_profile_session(
+    reference: str,
+    request: Request,
+    auth: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> Response:
+    await services.identities.revoke_own_session(
+        user_id=auth.principal.id,
+        reference=reference,
+        current_token_hash=auth.session.token_hash,
+    )
+    await audit(
+        services,
+        auth,
+        action="profile.session.revoked",
+        correlation=correlation_id(request),
+        object_type="session",
+        object_uid=reference,
+    )
+    await _notify_sessions_closed(services, auth.principal.id, 1)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/profile/sessions/revoke-others", response_model=MessageView)
+async def revoke_other_profile_sessions(
+    request: Request,
+    auth: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> MessageView:
+    closed = await services.identities.revoke_other_own_sessions(
+        user_id=auth.principal.id, current_token_hash=auth.session.token_hash
+    )
+    await audit(
+        services,
+        auth,
+        action="profile.sessions.revoked_others",
+        correlation=correlation_id(request),
+        details={"closed": closed},
+    )
+    if closed:
+        await _notify_sessions_closed(services, auth.principal.id, closed)
+    return MessageView(message=f"Se cerraron {closed} sesión(es) adicional(es).")
 
 
 @router.post("/profile/password", response_model=MessageView)

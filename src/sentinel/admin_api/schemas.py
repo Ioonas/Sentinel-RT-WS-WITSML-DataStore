@@ -263,5 +263,13 @@ class DependencyHealthView(BaseModel):
     dependencies: dict[str, dict]
 
 
+class ProfileSessionView(BaseModel):
+    reference: str
+    created_at: datetime
+    authenticated_at: datetime
+    expires_at: datetime
+    current: bool
+
+
 class MessageView(BaseModel):
     message: str

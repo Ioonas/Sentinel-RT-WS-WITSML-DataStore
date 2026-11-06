@@ -37,7 +37,10 @@ function grantLabel(grant: Grant): string {
 }
 
 export default function ServiceAccountsPage() {
-  const { data, error, loading, reload } = useApiQuery<ServiceAccountView[]>("/service-accounts");
+  const [showArchived, setShowArchived] = useState(false);
+  const { data, error, loading, reload } = useApiQuery<ServiceAccountView[]>(
+    showArchived ? "/service-accounts?include_archived=true" : "/service-accounts",
+  );
   const [name, setName] = useState("");
   const [role, setRole] = useState("reader");
   const [grants, setGrants] = useState<Grant[]>([
@@ -387,7 +390,19 @@ export default function ServiceAccountsPage() {
           <Section
             title="Cuentas registradas"
             description="Los cambios de estado, rotación y revocación quedan auditados."
-            actions={<Button size="sm" variant="ghost" onClick={reload}>Actualizar</Button>}
+            actions={
+              <div className={styles.actions}>
+                <label className={styles.faint} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={(event) => setShowArchived(event.target.checked)}
+                  />
+                  Mostrar archivadas
+                </label>
+                <Button size="sm" variant="ghost" onClick={reload}>Actualizar</Button>
+              </div>
+            }
           >
             {loading ? (
               <Spinner />
@@ -430,6 +445,9 @@ export default function ServiceAccountsPage() {
                                 status={account.can_cascade_delete ? "warn" : "neutral"}
                                 label={account.can_cascade_delete ? "Borrado en cascada" : "Sin borrado en cascada"}
                               />
+                              {account.archived_at ? (
+                                <StatusBadge status="neutral" label={`Archivada ${formatDateTime(account.archived_at)}`} />
+                              ) : null}
                               {account.replaced_by_id ? (
                                 <span className={styles.faint}>
                                   Reemplazada por {account.replaced_by_id}
@@ -442,6 +460,9 @@ export default function ServiceAccountsPage() {
                           </td>
                           <td className={styles.faint}>{formatDateTime(account.last_used_at)}</td>
                           <td>
+                            {account.archived_at ? (
+                              <span className={styles.faint}>Solo lectura</span>
+                            ) : (
                             <div className={styles.actions}>
                               <Button size="sm" onClick={() => openEdit(account)}>
                                 Editar
@@ -459,6 +480,7 @@ export default function ServiceAccountsPage() {
                                 Archivar
                               </Button>
                             </div>
+                            )}
                           </td>
                         </tr>
                       ))

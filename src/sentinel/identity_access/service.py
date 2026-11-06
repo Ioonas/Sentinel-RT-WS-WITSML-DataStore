@@ -5,6 +5,7 @@ Este módulo es núcleo: no importa adaptadores. Recibe puertos por inyección.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -79,6 +80,11 @@ class LoginResult:
     csrf_token: str
     principal: Principal
     expires_at: datetime
+
+
+def session_reference(token_hash: str) -> str:
+    """Referencia opaca y estable de una sesión; no expone el hash guardado."""
+    return hashlib.sha256(f"session-ref:{token_hash}".encode()).hexdigest()[:32]
 
 
 class IdentityService:
@@ -245,9 +251,13 @@ class IdentityService:
         account.enabled = False
         await self._repo.save_service_account(account)
 
-    async def list_service_accounts(self) -> list[ServiceAccountRecord]:
-        # Las cuentas archivadas no aparecen en la lista activa; su registro se conserva.
+    async def list_service_accounts(
+        self, *, include_archived: bool = False
+    ) -> list[ServiceAccountRecord]:
+        # Por defecto las archivadas no aparecen; su registro se conserva siempre.
         accounts = await self._repo.list_service_accounts()
+        if include_archived:
+            return accounts
         return [account for account in accounts if not account.is_archived]
 
     async def get_service_account(self, account_id: str) -> ServiceAccountRecord:
@@ -329,6 +339,31 @@ class IdentityService:
         user.locked_until = None
         await self._repo.save_admin_user(user)
         await self._repo.update_session_authenticated_at(token_hash, now)
+
+    async def list_own_sessions(self, user_id: str) -> list[SessionRecord]:
+        return await self._repo.list_user_sessions(user_id, self._clock.now())
+
+    async def revoke_own_session(
+        self, *, user_id: str, reference: str, current_token_hash: str
+    ) -> SessionRecord:
+        now = self._clock.now()
+        sessions = await self._repo.list_user_sessions(user_id, now)
+        target = next(
+            (s for s in sessions if session_reference(s.token_hash) == reference), None
+        )
+        if target is None:
+            raise NotFoundError("Sesión no encontrada.")
+        if target.token_hash == current_token_hash:
+            raise ConflictError("Para cerrar la sesión actual use «Cerrar sesión».")
+        await self._repo.revoke_session(target.token_hash, now)
+        return target
+
+    async def revoke_other_own_sessions(
+        self, *, user_id: str, current_token_hash: str
+    ) -> int:
+        return await self._repo.revoke_other_user_sessions(
+            user_id, current_token_hash, self._clock.now()
+        )
 
     async def logout(self, token: str) -> None:
         if token:

@@ -198,10 +198,12 @@ async def _require_known_wells(services: RequestServices, uids: list[str] | None
 
 @router.get("/service-accounts", response_model=list[ServiceAccountView])
 async def list_service_accounts(
+    include_archived: bool = Query(default=False),
     _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
     services: RequestServices = Depends(get_services),
 ) -> list[ServiceAccountView]:
-    return [_account_view(item) for item in await services.identities.list_service_accounts()]
+    accounts = await services.identities.list_service_accounts(include_archived=include_archived)
+    return [_account_view(item) for item in accounts]
 
 
 @router.post(
