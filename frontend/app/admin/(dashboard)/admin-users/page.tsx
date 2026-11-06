@@ -100,14 +100,16 @@ export default function AdminUsersPage() {
     setInviteError(null);
     setInvitation(null);
     try {
-      const result = await api<InvitationView>("/invitations", {
-        method: "POST",
-        body: JSON.stringify({
-          email: inviteEmail,
-          role: inviteRole,
-          permissions: inviteRole === "administrador" ? invitePermissions : null,
+      const result = await runWithReauth(() =>
+        api<InvitationView>("/invitations", {
+          method: "POST",
+          body: JSON.stringify({
+            email: inviteEmail,
+            role: inviteRole,
+            permissions: inviteRole === "administrador" ? invitePermissions : null,
+          }),
         }),
-      });
+      );
       setInvitation(result);
       setInviteEmail("");
       setInvitePermissions([]);

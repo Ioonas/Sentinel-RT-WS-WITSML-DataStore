@@ -88,19 +88,21 @@ export default function ServiceAccountsPage() {
     setCreated(null);
     setRotated(null);
     try {
-      const result = await api<CreatedAccount>("/service-accounts", {
-        method: "POST",
-        body: JSON.stringify({
-          name,
-          role,
-          grants,
-          well_scope: selectedWells.length > 0 ? selectedWells : null,
-          can_cascade_delete: cascade,
-          replaces_account_id: replacesId || null,
-          replacement_grace_days: replacesId ? Number(graceDays) : undefined,
-          credential: credential || undefined,
+      const result = await runWithReauth(() =>
+        api<CreatedAccount>("/service-accounts", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            role,
+            grants,
+            well_scope: selectedWells.length > 0 ? selectedWells : null,
+            can_cascade_delete: cascade,
+            replaces_account_id: replacesId || null,
+            replacement_grace_days: replacesId ? Number(graceDays) : undefined,
+            credential: credential || undefined,
+          }),
         }),
-      });
+      );
       setCreated(result);
       setName("");
       setSelectedWells([]);
