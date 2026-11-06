@@ -301,6 +301,34 @@ async def test_archived_service_accounts_listed_only_on_request(
     assert full.status_code == 200
     match = [item for item in full.json() if item["id"] == account_id]
     assert len(match) == 1 and match[0]["archived_at"] is not None
+    assert match[0]["purge_at"] is not None
+
+
+async def test_admin_routes_manage_user_sessions(admin_client: AsyncClient, csrf: str) -> None:
+    headers = {"x-csrf-token": csrf}
+    me = (await admin_client.get("/admin-api/v1/profile")).json()["user"]["id"]
+
+    listed = await admin_client.get(f"/admin-api/v1/admin-users/{me}/sessions")
+    assert listed.status_code == 200, listed.text
+    current = [item for item in listed.json() if item["current"]]
+    assert len(current) == 1
+
+    own = await admin_client.delete(
+        f"/admin-api/v1/admin-users/{me}/sessions/{current[0]['reference']}", headers=headers
+    )
+    assert own.status_code == 409
+
+    closed = await admin_client.post(
+        f"/admin-api/v1/admin-users/{me}/sessions/revoke-all", headers=headers
+    )
+    assert closed.status_code == 200, closed.text
+
+    # La sesión que opera no se cierra al revocar todas las de su usuario.
+    profile = await admin_client.get("/admin-api/v1/profile")
+    assert profile.status_code == 200
+
+    missing = await admin_client.get("/admin-api/v1/admin-users/no-existe/sessions")
+    assert missing.status_code == 404
 
 
 async def test_roles_permissions_and_audit(admin_client: AsyncClient) -> None:

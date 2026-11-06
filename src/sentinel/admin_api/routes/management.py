@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from sentinel.admin_api.deps import (
     AuthContext,
@@ -32,6 +32,7 @@ from sentinel.admin_api.schemas import (
     InvitationView,
     MessageView,
     PermissionView,
+    ProfileSessionView,
     RoleView,
     RotateCredentialRequest,
     ServerConfigView,
@@ -51,6 +52,7 @@ from sentinel.identity_access.domain import (
     Grant,
 )
 from sentinel.identity_access.ports import AdminUserRecord, ServiceAccountRecord
+from sentinel.identity_access.service import ARCHIVE_GRACE, session_reference
 from sentinel.shared.errors import ValidationError
 
 router = APIRouter(tags=["Administración"])
@@ -83,6 +85,7 @@ def _account_view(account: ServiceAccountRecord) -> ServiceAccountView:
         replaced_by_id=account.replaced_by_id,
         replacement_expires_at=account.replacement_expires_at,
         archived_at=account.archived_at,
+        purge_at=account.archived_at + ARCHIVE_GRACE if account.archived_at else None,
     )
 
 
@@ -432,6 +435,86 @@ async def update_admin_user(
         details={"enabled": user.enabled, "role": user.role.value},
     )
     return user_view(user)
+
+
+@router.get("/admin-users/{user_id}/sessions", response_model=list[ProfileSessionView])
+async def admin_list_user_sessions(
+    user_id: str,
+    auth: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    services: RequestServices = Depends(get_services),
+) -> list[ProfileSessionView]:
+    await services.identities.get_admin_user(user_id)
+    sessions = await services.identities.list_own_sessions(user_id)
+    return [
+        ProfileSessionView(
+            reference=session_reference(item.token_hash),
+            created_at=item.created_at,
+            authenticated_at=item.authenticated_at,
+            expires_at=item.expires_at,
+            current=item.token_hash == auth.session.token_hash,
+        )
+        for item in sessions
+    ]
+
+
+@router.delete(
+    "/admin-users/{user_id}/sessions/{reference}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def admin_revoke_user_session(
+    user_id: str,
+    reference: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> Response:
+    target = await services.identities.get_admin_user(user_id)
+    await services.identities.revoke_own_session(
+        user_id=user_id,
+        reference=reference,
+        current_token_hash=auth.session.token_hash,
+    )
+    await audit(
+        services,
+        auth,
+        action="admin-user.session.revoked",
+        correlation=correlation_id(request),
+        object_type="admin_user",
+        object_uid=user_id,
+        details={"target": target.email, "reference": reference},
+    )
+    await services.mail.enqueue_sessions_closed(target.email, 1)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/admin-users/{user_id}/sessions/revoke-all", response_model=MessageView)
+async def admin_revoke_all_user_sessions(
+    user_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> MessageView:
+    target = await services.identities.get_admin_user(user_id)
+    # Conserva la sesión actual solo si el objetivo es quien opera; en otro caso no afecta.
+    closed = await services.identities.revoke_other_own_sessions(
+        user_id=user_id, current_token_hash=auth.session.token_hash
+    )
+    await audit(
+        services,
+        auth,
+        action="admin-user.sessions.revoked",
+        correlation=correlation_id(request),
+        object_type="admin_user",
+        object_uid=user_id,
+        details={"target": target.email, "closed": closed},
+    )
+    if closed:
+        await services.mail.enqueue_sessions_closed(target.email, closed)
+    return MessageView(message=f"Se cerraron {closed} sesión(es) de {target.email}.")
 
 
 @router.get("/invitations", response_model=list[InvitationSummaryView])

@@ -169,7 +169,7 @@ export default function ServiceAccountsPage() {
     setConfirming({
       title: `Archivar la cuenta «${account.name}»`,
       description:
-        "La cuenta deja de autenticarse y sale de la lista. Su historial de auditoría se conserva.",
+        "La cuenta deja de autenticarse y sale de la lista. Su historial de auditoría se conserva. Se borrará automáticamente 3 días después de archivarse.",
       confirmLabel: "Archivar cuenta",
       tone: "danger",
       run: () => archiveNow(account),
@@ -461,7 +461,9 @@ export default function ServiceAccountsPage() {
                           <td className={styles.faint}>{formatDateTime(account.last_used_at)}</td>
                           <td>
                             {account.archived_at ? (
-                              <span className={styles.faint}>Solo lectura</span>
+                              <span className={styles.faint}>
+                                Solo lectura{account.purge_at ? ` · se borra el ${formatDateTime(account.purge_at)}` : ""}
+                              </span>
                             ) : (
                             <div className={styles.actions}>
                               <Button size="sm" onClick={() => openEdit(account)}>

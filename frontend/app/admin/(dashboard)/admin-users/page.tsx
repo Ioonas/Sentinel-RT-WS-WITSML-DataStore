@@ -18,7 +18,9 @@ import {
   api,
   type InvitationSummaryView,
   type InvitationView,
+  type MessageView,
   type PermissionView,
+  type ProfileSessionView,
   type UserView,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -58,6 +60,10 @@ export default function AdminUsersPage() {
   const [actingInvitationId, setActingInvitationId] = useState<string | null>(null);
   const [invitationActionError, setInvitationActionError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
+  const [userSessionBusy, setUserSessionBusy] = useState(false);
+  const [userSessionError, setUserSessionError] = useState<string | null>(null);
+  const [userSessionMessage, setUserSessionMessage] = useState<string | null>(null);
+  const [confirmingUserSession, setConfirmingUserSession] = useState<ConfirmRequest | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("auditor");
@@ -69,6 +75,9 @@ export default function AdminUsersPage() {
 
   const selected = users.data?.find((user) => user.id === selectedId) ?? null;
   const permissionNames = (permissions.data ?? []).map((item) => item.name);
+  const userSessions = useApiQuery<ProfileSessionView[]>(
+    selected ? `/admin-users/${selected.id}/sessions` : null,
+  );
 
   useEffect(() => {
     if (!selected) return;
@@ -166,6 +175,80 @@ export default function AdminUsersPage() {
     const request = confirming;
     // Se cierra primero para que la reautenticación no quede apilada sobre la confirmación.
     setConfirming(null);
+    void request?.run();
+  }
+
+  async function closeUserSession(reference: string) {
+    if (!selected) return;
+    setUserSessionBusy(true);
+    setUserSessionError(null);
+    setUserSessionMessage(null);
+    try {
+      await runWithReauth(() =>
+        api(`/admin-users/${selected.id}/sessions/${reference}`, { method: "DELETE" }),
+      );
+      setUserSessionMessage("Sesión cerrada. Se avisó al usuario por correo.");
+      userSessions.reload();
+    } catch (caught) {
+      setUserSessionError(
+        describeActionError(
+          caught,
+          "No se pudo cerrar la sesión.",
+          "La sesión no se cerró. Confirme su contraseña para continuar.",
+        ),
+      );
+    } finally {
+      setUserSessionBusy(false);
+    }
+  }
+
+  async function closeAllUserSessions() {
+    if (!selected) return;
+    setUserSessionBusy(true);
+    setUserSessionError(null);
+    setUserSessionMessage(null);
+    try {
+      const result = await runWithReauth(() =>
+        api<MessageView>(`/admin-users/${selected.id}/sessions/revoke-all`, { method: "POST" }),
+      );
+      setUserSessionMessage(result.message);
+      userSessions.reload();
+    } catch (caught) {
+      setUserSessionError(
+        describeActionError(
+          caught,
+          "No se pudieron cerrar las sesiones.",
+          "Las sesiones no se cerraron. Confirme su contraseña para continuar.",
+        ),
+      );
+    } finally {
+      setUserSessionBusy(false);
+    }
+  }
+
+  function askCloseUserSession(reference: string) {
+    setConfirmingUserSession({
+      title: "Cerrar sesión del usuario",
+      description: `La sesión de ${selected?.email ?? "este usuario"} dejará de funcionar de inmediato. Se le avisará por correo.`,
+      confirmLabel: "Cerrar sesión",
+      run: () => closeUserSession(reference),
+    });
+  }
+
+  function askCloseAllUserSessions() {
+    const count = (userSessions.data ?? []).filter((item) => !item.current).length;
+    setConfirmingUserSession({
+      title: "Cerrar todas las sesiones",
+      description: `Se cerrarán ${count} sesión(es) de ${selected?.email ?? "este usuario"}. Se le avisará por correo.`,
+      confirmLabel: "Cerrar todas",
+      run: closeAllUserSessions,
+    });
+  }
+
+  function runConfirmedUserSession() {
+    const request = confirmingUserSession;
+    // Se cierra primero para no apilar la confirmación con la reautenticación.
+    setConfirmingUserSession(null);
     void request?.run();
   }
 
@@ -468,6 +551,101 @@ export default function AdminUsersPage() {
             </form>
           </Section>
         </Card>
+      ) : null}
+
+      {selected ? (
+        <Card>
+          <Section
+            title="Sesiones activas"
+            description={`Sesiones abiertas de ${selected.email}. Cerrarlas requiere reautenticación; se avisa al usuario por correo y queda auditado.`}
+            actions={
+              <Button size="sm" variant="ghost" onClick={userSessions.reload}>
+                Actualizar
+              </Button>
+            }
+          >
+            {userSessionError ? <Alert>{userSessionError}</Alert> : null}
+            {userSessionMessage ? <Alert tone="ok">{userSessionMessage}</Alert> : null}
+            {userSessions.loading ? (
+              <Spinner />
+            ) : userSessions.error ? (
+              <Alert>{userSessions.error.message}</Alert>
+            ) : (
+              <>
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Iniciada</th>
+                        <th>Última autenticación</th>
+                        <th>Vence</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {userSessions.data && userSessions.data.length > 0 ? (
+                        userSessions.data.map((item) => (
+                          <tr key={item.reference}>
+                            <td className={styles.faint}>{formatDateTime(item.created_at)}</td>
+                            <td className={styles.faint}>{formatDateTime(item.authenticated_at)}</td>
+                            <td className={styles.faint}>{formatDateTime(item.expires_at)}</td>
+                            <td>
+                              <StatusBadge
+                                status={item.current ? "ok" : "neutral"}
+                                label={item.current ? "Esta sesión" : "Activa"}
+                              />
+                            </td>
+                            <td>
+                              {item.current ? (
+                                <span className={styles.faint}>Use «Cerrar sesión» en su perfil</span>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  disabled={userSessionBusy}
+                                  onClick={() => askCloseUserSession(item.reference)}
+                                >
+                                  Cerrar
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <EmptyRow colSpan={5}>Sin sesiones activas.</EmptyRow>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={styles.actions} style={{ marginTop: "var(--space-4)" }}>
+                  <Button
+                    variant="danger"
+                    disabled={
+                      userSessionBusy ||
+                      !(userSessions.data ?? []).some((item) => !item.current)
+                    }
+                    onClick={askCloseAllUserSessions}
+                  >
+                    Cerrar todas las sesiones
+                  </Button>
+                </div>
+              </>
+            )}
+          </Section>
+        </Card>
+      ) : null}
+
+      {confirmingUserSession ? (
+        <ConfirmDialog
+          title={confirmingUserSession.title}
+          description={confirmingUserSession.description}
+          confirmLabel={confirmingUserSession.confirmLabel}
+          tone="danger"
+          busy={userSessionBusy}
+          onConfirm={runConfirmedUserSession}
+          onCancel={() => setConfirmingUserSession(null)}
+        />
       ) : null}
 
       {confirming ? (

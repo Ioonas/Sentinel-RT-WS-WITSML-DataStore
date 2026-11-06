@@ -72,6 +72,8 @@ def _register_failure(record, now: datetime) -> None:
         record.locked_until = now + LOCKOUT_DURATION
         record.failed_attempts = 0
 INVITATION_TTL = timedelta(hours=72)
+# Tiempo que una cuenta archivada permanece antes de su borrado automático.
+ARCHIVE_GRACE = timedelta(days=3)
 
 
 @dataclass(frozen=True)
@@ -250,6 +252,22 @@ class IdentityService:
         account.credential_hash = None
         account.enabled = False
         await self._repo.save_service_account(account)
+
+    async def purge_expired_archived_accounts(self) -> list[ServiceAccountRecord]:
+        """Borra las cuentas archivadas cuyo periodo de gracia ya venció.
+
+        Es idempotente: una cuenta borrada no vuelve a aparecer en la siguiente pasada.
+        """
+        cutoff = self._clock.now() - ARCHIVE_GRACE
+        accounts = await self._repo.list_service_accounts()
+        expired = [
+            account
+            for account in accounts
+            if account.archived_at is not None and account.archived_at <= cutoff
+        ]
+        for account in expired:
+            await self._repo.delete_service_account(account.id)
+        return expired
 
     async def list_service_accounts(
         self, *, include_archived: bool = False

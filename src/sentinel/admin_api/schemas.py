@@ -138,6 +138,7 @@ class ServiceAccountView(BaseModel):
     replaced_by_id: str | None = None
     replacement_expires_at: datetime | None = None
     archived_at: datetime | None = None
+    purge_at: datetime | None = None
 
 
 class CredentialView(BaseModel):

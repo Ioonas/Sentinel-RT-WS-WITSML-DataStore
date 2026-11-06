@@ -126,6 +126,7 @@ export type ServiceAccountView = {
   replaced_by_id: string | null;
   replacement_expires_at: string | null;
   archived_at?: string | null;
+  purge_at?: string | null;
 };
 
 export type CredentialView = { secret: string | null; message: string };
