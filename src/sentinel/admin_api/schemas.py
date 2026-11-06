@@ -112,6 +112,11 @@ class ServiceAccountCreate(StrictModel):
     credential: str | None = Field(default=None, max_length=128)
 
 
+class RotateCredentialRequest(StrictModel):
+    # Opcional: si se omite, el servidor genera la credencial nueva.
+    credential: str | None = Field(default=None, max_length=128)
+
+
 class ServiceAccountUpdate(StrictModel):
     enabled: bool | None = None
     role: ServiceRole | None = None
@@ -132,6 +137,7 @@ class ServiceAccountView(BaseModel):
     can_cascade_delete: bool = False
     replaced_by_id: str | None = None
     replacement_expires_at: datetime | None = None
+    archived_at: datetime | None = None
 
 
 class CredentialView(BaseModel):

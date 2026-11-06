@@ -1110,6 +1110,7 @@ class SqlAlchemyIdentityRepository:
         row.can_cascade_delete = account.can_cascade_delete
         row.replaced_by_id = account.replaced_by_id
         row.replacement_expires_at = account.replacement_expires_at
+        row.archived_at = account.archived_at
         await self._session.flush()
 
     async def delete_service_account(self, account_id: str) -> None:
@@ -1326,6 +1327,7 @@ class SqlAlchemyIdentityRepository:
             can_cascade_delete=row.can_cascade_delete,
             replaced_by_id=row.replaced_by_id,
             replacement_expires_at=row.replacement_expires_at,
+            archived_at=row.archived_at,
         )
 
     @staticmethod

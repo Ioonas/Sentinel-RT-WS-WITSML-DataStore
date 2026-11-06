@@ -33,6 +33,7 @@ from sentinel.admin_api.schemas import (
     MessageView,
     PermissionView,
     RoleView,
+    RotateCredentialRequest,
     ServerConfigView,
     ServiceAccountCreate,
     ServiceAccountCreatedView,
@@ -81,6 +82,7 @@ def _account_view(account: ServiceAccountRecord) -> ServiceAccountView:
         can_cascade_delete=account.can_cascade_delete,
         replaced_by_id=account.replaced_by_id,
         replacement_expires_at=account.replacement_expires_at,
+        archived_at=account.archived_at,
     )
 
 
@@ -307,11 +309,13 @@ async def update_service_account(
 async def rotate_credential(
     account_id: str,
     request: Request,
+    payload: RotateCredentialRequest | None = None,
     auth: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
     _: AuthContext = Depends(require_csrf),
     services: RequestServices = Depends(get_services),
 ) -> CredentialView:
-    secret = await services.identities.rotate_credential(account_id)
+    credential = payload.credential if payload else None
+    secret = await services.identities.rotate_credential(account_id, credential=credential)
     await audit(
         services,
         auth,
@@ -319,8 +323,42 @@ async def rotate_credential(
         correlation=correlation_id(request),
         object_type="service_account",
         object_uid=account_id,
+        details={"credential_source": "generated" if secret is not None else "admin"},
     )
+    if secret is None:
+        return CredentialView(
+            secret=None,
+            message=(
+                "Credencial definida por el administrador. "
+                "No se muestra ni se guarda en texto claro."
+            ),
+        )
     return CredentialView(secret=secret)
+
+
+@router.post(
+    "/service-accounts/{account_id}/archive",
+    response_model=ServiceAccountView,
+)
+async def archive_service_account(
+    account_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ServiceAccountView:
+    account = await services.identities.archive_service_account(account_id)
+    await audit(
+        services,
+        auth,
+        action="service-account.archived",
+        correlation=correlation_id(request),
+        object_type="service_account",
+        object_uid=account.id,
+        details={"name": account.name},
+    )
+    return _account_view(account)
 
 
 @router.post(

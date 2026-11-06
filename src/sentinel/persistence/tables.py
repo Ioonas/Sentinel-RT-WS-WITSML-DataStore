@@ -304,6 +304,7 @@ class ServiceAccountRow(Base):
     )
     replaced_by_id: Mapped[str | None] = mapped_column(String(64))
     replacement_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class MailOutboxRow(Base):

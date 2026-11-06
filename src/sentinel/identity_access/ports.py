@@ -37,6 +37,12 @@ class ServiceAccountRecord:
     can_cascade_delete: bool = False
     replaced_by_id: str | None = None
     replacement_expires_at: datetime | None = None
+    # Una cuenta archivada conserva su registro y su auditoría, pero no autentica.
+    archived_at: datetime | None = None
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
 
     def is_retired(self, now: datetime) -> bool:
         """Cuenta reemplazada cuyo periodo de transición ya terminó."""

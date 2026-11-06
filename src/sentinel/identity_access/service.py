@@ -146,6 +146,8 @@ class IdentityService:
         self._validate_grants(role, grants)
         if replaces is not None and replaces.replaced_by_id is not None:
             raise ConflictError("La cuenta indicada ya fue reemplazada.")
+        if replaces is not None and replaces.is_archived:
+            raise ConflictError("La cuenta indicada está archivada.")
         if credential is None:
             secret = self._new_secret()
             returned: str | None = secret
@@ -186,6 +188,8 @@ class IdentityService:
         account = await self._repo.get_service_account(account_id)
         if account is None:
             raise NotFoundError("Cuenta de servicio no encontrada.")
+        if account.is_archived:
+            raise ConflictError("La cuenta está archivada y no se puede modificar.")
         effective_role = role or account.role
         effective_grants = tuple(grants) if grants is not None else account.grants
         self._validate_grants(effective_role, list(effective_grants))
@@ -198,16 +202,40 @@ class IdentityService:
         await self._repo.save_service_account(account)
         return account
 
-    async def rotate_credential(self, account_id: str) -> str:
+    async def rotate_credential(
+        self, account_id: str, *, credential: str | None = None
+    ) -> str | None:
+        """Genera una credencial nueva, o usa la indicada. Devuelve el secreto generado o None."""
         account = await self._repo.get_service_account(account_id)
         if account is None:
             raise NotFoundError("Cuenta de servicio no encontrada.")
-        secret = self._new_secret()
+        if account.is_archived:
+            raise ConflictError("La cuenta está archivada y no se puede modificar.")
+        if credential is None:
+            secret = self._new_secret()
+            returned: str | None = secret
+        else:
+            self._validate_service_credential(account.name, credential)
+            secret = credential
+            returned = None
         account.credential_hash = self._hasher.hash(secret)
         account.rotated_at = self._clock.now()
         account.enabled = True
         await self._repo.save_service_account(account)
-        return secret
+        return returned
+
+    async def archive_service_account(self, account_id: str) -> ServiceAccountRecord:
+        """Archiva la cuenta: deja de autenticar y sale de la lista, pero conserva su registro."""
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        if account.is_archived:
+            raise ConflictError("La cuenta ya está archivada.")
+        account.archived_at = self._clock.now()
+        account.enabled = False
+        account.credential_hash = None
+        await self._repo.save_service_account(account)
+        return account
 
     async def revoke_credential(self, account_id: str) -> None:
         account = await self._repo.get_service_account(account_id)
@@ -218,7 +246,9 @@ class IdentityService:
         await self._repo.save_service_account(account)
 
     async def list_service_accounts(self) -> list[ServiceAccountRecord]:
-        return await self._repo.list_service_accounts()
+        # Las cuentas archivadas no aparecen en la lista activa; su registro se conserva.
+        accounts = await self._repo.list_service_accounts()
+        return [account for account in accounts if not account.is_archived]
 
     async def get_service_account(self, account_id: str) -> ServiceAccountRecord:
         account = await self._repo.get_service_account(account_id)

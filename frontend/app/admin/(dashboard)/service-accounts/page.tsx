@@ -5,6 +5,7 @@ import { Alert, Button, Card, Field, Input, PageHeader, Select, Spinner, StatusB
 import { EmptyRow, GrantEditor, Section, Tags } from "@/components/dashboard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModalDialog } from "@/components/Dialog";
+import { useReauth } from "@/components/Reauth";
 import dialogStyles from "@/components/Dialog.module.css";
 import {
   ApiError,
@@ -51,10 +52,15 @@ export default function ServiceAccountsPage() {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAccount | null>(null);
-  const [rotated, setRotated] = useState<{ name: string; secret: string } | null>(null);
+  const [rotated, setRotated] = useState<{ name: string; secret: string | null } | null>(null);
+  const [rotating, setRotating] = useState<ServiceAccountView | null>(null);
+  const [rotateCredential, setRotateCredential] = useState("");
+  const [rotateConfirm, setRotateConfirm] = useState("");
+  const [rotateBusy, setRotateBusy] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+  const { runWithReauth } = useReauth();
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
-  const [confirmBusy, setConfirmBusy] = useState(false);
   const [editing, setEditing] = useState<ServiceAccountView | null>(null);
   const [editRole, setEditRole] = useState("reader");
   const [editGrants, setEditGrants] = useState<Grant[]>([]);
@@ -117,27 +123,65 @@ export default function ServiceAccountsPage() {
   }
 
   function rotate(account: ServiceAccountView) {
+    setRotating(account);
+    setRotateCredential("");
+    setRotateConfirm("");
+    setRotateError(null);
+  }
+
+  function closeRotate() {
+    if (rotateBusy) return;
+    setRotating(null);
+  }
+
+  async function submitRotate(event: FormEvent) {
+    event.preventDefault();
+    if (!rotating) return;
+    if (rotateCredential && rotateCredential !== rotateConfirm) {
+      setRotateError("La credencial y su repetición no coinciden.");
+      return;
+    }
+    setRotateBusy(true);
+    setRotateError(null);
+    try {
+      const result = await api<CredentialView>(
+        `/service-accounts/${rotating.id}/rotate-credential`,
+        {
+          method: "POST",
+          body: rotateCredential ? JSON.stringify({ credential: rotateCredential }) : undefined,
+        },
+      );
+      setCreated(null);
+      setRotated({ name: rotating.name, secret: result.secret });
+      setRotating(null);
+      reload();
+    } catch (caught) {
+      setRotateError(caught instanceof ApiError ? caught.message : "No se pudo rotar la credencial.");
+    } finally {
+      setRotateBusy(false);
+    }
+  }
+
+  function archive(account: ServiceAccountView) {
     setConfirming({
-      title: `Rotar la credencial de «${account.name}»`,
+      title: `Archivar la cuenta «${account.name}»`,
       description:
-        "Se genera una credencial nueva y la actual deja de funcionar de inmediato. Los clientes que la usen tendrán que actualizarla.",
-      confirmLabel: "Rotar credencial",
-      tone: "warn",
-      run: () => rotateNow(account),
+        "La cuenta deja de autenticarse y sale de la lista. Su historial de auditoría se conserva.",
+      confirmLabel: "Archivar cuenta",
+      tone: "danger",
+      run: () => archiveNow(account),
     });
   }
 
-  async function rotateNow(account: ServiceAccountView) {
+  async function archiveNow(account: ServiceAccountView) {
     setActionError(null);
-    setCreated(null);
     try {
-      const result = await api<CredentialView>(`/service-accounts/${account.id}/rotate-credential`, {
-        method: "POST",
-      });
-      setRotated({ name: account.name, secret: result.secret ?? "" });
+      await runWithReauth(() =>
+        api<ServiceAccountView>(`/service-accounts/${account.id}/archive`, { method: "POST" }),
+      );
       reload();
     } catch (caught) {
-      setActionError(caught instanceof ApiError ? caught.message : "No se pudo rotar la credencial.");
+      setActionError(caught instanceof ApiError ? caught.message : "No se pudo archivar la cuenta.");
     }
   }
 
@@ -196,19 +240,62 @@ export default function ServiceAccountsPage() {
     }
   }
 
-  async function runConfirmed() {
-    if (!confirming) return;
-    setConfirmBusy(true);
-    try {
-      await confirming.run();
-    } finally {
-      setConfirmBusy(false);
-      setConfirming(null);
-    }
+  function runConfirmed() {
+    const request = confirming;
+    setConfirming(null);
+    void request?.run();
   }
 
   return (
     <div className={styles.stack}>
+      {rotating ? (
+        <ModalDialog titleId="rotate-title" wide busy={rotateBusy} onClose={closeRotate}>
+          <h2 id="rotate-title" className={dialogStyles.title}>
+            Rotar la credencial de «{rotating.name}»
+          </h2>
+          <p className={dialogStyles.text}>
+            La credencial actual deja de funcionar de inmediato. Déjela vacía para que el servidor
+            genere una nueva; esa sí se muestra una sola vez.
+          </p>
+          {rotateError ? <Alert>{rotateError}</Alert> : null}
+          <form className={dialogStyles.form} onSubmit={submitRotate}>
+            <Field
+              label="Credencial propia (opcional)"
+              htmlFor="rotate-credential"
+              hint={`15 caracteres mínimo; letras, números, punto, guion y guion bajo. Máximo ${Math.max(0, 56 - rotating.name.length)} para este nombre.`}
+            >
+              <PasswordInput
+                id="rotate-credential"
+                data-initial-focus=""
+                autoComplete="new-password"
+                minLength={15}
+                maxLength={Math.max(0, 56 - rotating.name.length)}
+                pattern="[A-Za-z0-9._\-]*"
+                value={rotateCredential}
+                onChange={(event) => setRotateCredential(event.target.value)}
+              />
+            </Field>
+            {rotateCredential ? (
+              <Field label="Repetir credencial" htmlFor="rotate-credential-confirm">
+                <PasswordInput
+                  id="rotate-credential-confirm"
+                  autoComplete="new-password"
+                  value={rotateConfirm}
+                  onChange={(event) => setRotateConfirm(event.target.value)}
+                />
+              </Field>
+            ) : null}
+            <div className={dialogStyles.actions}>
+              <Button type="button" variant="ghost" onClick={closeRotate} disabled={rotateBusy}>
+                Cancelar
+              </Button>
+              <Button type="submit" variant="primary" disabled={rotateBusy}>
+                {rotateBusy ? "Rotando…" : "Rotar credencial"}
+              </Button>
+            </div>
+          </form>
+        </ModalDialog>
+      ) : null}
       {editing ? (
         <ModalDialog titleId="edit-account-title" wide busy={editBusy} onClose={closeEdit}>
           <h2 id="edit-account-title" className={dialogStyles.title}>
@@ -253,7 +340,6 @@ export default function ServiceAccountsPage() {
           description={confirming.description}
           confirmLabel={confirming.confirmLabel}
           tone={confirming.tone}
-          busy={confirmBusy}
           onConfirm={runConfirmed}
           onCancel={() => setConfirming(null)}
         />
@@ -284,7 +370,11 @@ export default function ServiceAccountsPage() {
       {rotated ? (
         <Alert tone="warn">
           Nueva credencial para <strong>{rotated.name}</strong>. La anterior fue invalidada.
-          <code className={styles.secret}>{rotated.secret}</code>
+          {rotated.secret ? (
+            <code className={styles.secret}>{rotated.secret}</code>
+          ) : (
+            " Se guardó la credencial que definió el administrador."
+          )}
         </Alert>
       ) : null}
 
@@ -360,6 +450,9 @@ export default function ServiceAccountsPage() {
                               </Button>
                               <Button size="sm" variant="danger" onClick={() => revoke(account)}>
                                 Revocar
+                              </Button>
+                              <Button size="sm" variant="danger" onClick={() => archive(account)}>
+                                Archivar
                               </Button>
                             </div>
                           </td>

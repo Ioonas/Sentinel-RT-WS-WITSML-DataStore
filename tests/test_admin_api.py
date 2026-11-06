@@ -141,6 +141,60 @@ async def test_service_account_rejects_invalid_admin_credential(
     assert response.status_code == 422, response.text
 
 
+async def test_rotate_accepts_admin_defined_credential_and_archive_hides_account(
+    admin_client: AsyncClient, csrf: str
+) -> None:
+    created = await admin_client.post(
+        "/admin-api/v1/service-accounts",
+        headers={"x-csrf-token": csrf},
+        json={
+            "name": "acme.rotor",
+            "role": "reader",
+            "grants": [{"object_type": "*", "action": "read"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    account_id = created.json()["account"]["id"]
+
+    rotated = await admin_client.post(
+        f"/admin-api/v1/service-accounts/{account_id}/rotate-credential",
+        headers={"x-csrf-token": csrf},
+        json={"credential": "Operativa-Rotada-2026"},
+    )
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.json()["secret"] is None
+
+    archived = await admin_client.post(
+        f"/admin-api/v1/service-accounts/{account_id}/archive",
+        headers={"x-csrf-token": csrf},
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["archived_at"] is not None
+    assert archived.json()["enabled"] is False
+
+    listing = await admin_client.get("/admin-api/v1/service-accounts")
+    assert all(item["id"] != account_id for item in listing.json())
+
+    again = await admin_client.post(
+        f"/admin-api/v1/service-accounts/{account_id}/archive",
+        headers={"x-csrf-token": csrf},
+    )
+    assert again.status_code == 409
+
+    rotate_archived = await admin_client.post(
+        f"/admin-api/v1/service-accounts/{account_id}/rotate-credential",
+        headers={"x-csrf-token": csrf},
+    )
+    assert rotate_archived.status_code == 409
+
+    patch_archived = await admin_client.patch(
+        f"/admin-api/v1/service-accounts/{account_id}",
+        headers={"x-csrf-token": csrf},
+        json={"enabled": True},
+    )
+    assert patch_archived.status_code == 409
+
+
 async def test_roles_permissions_and_audit(admin_client: AsyncClient) -> None:
     roles = await admin_client.get("/admin-api/v1/roles")
     assert roles.status_code == 200
