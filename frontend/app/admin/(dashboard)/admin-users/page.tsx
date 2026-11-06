@@ -1,7 +1,7 @@
 "use client";
 
 import { permissionLabel } from "@/lib/permissions";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
   Alert,
@@ -85,6 +85,11 @@ export default function AdminUsersPage() {
   const [editBusy, setEditBusy] = useState(false);
 
   const selected = users.data?.find((user) => user.id === selectedId) ?? null;
+  // El panel de edición está al final de la página: al elegir una cuenta se desplaza hasta él.
+  const editRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedId) editRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedId]);
   const permissionNames = (permissions.data ?? []).map((item) => item.name);
   const userSessions = useApiQuery<ProfileSessionView[]>(
     selected ? `/admin-users/${selected.id}/sessions` : null,
@@ -541,6 +546,7 @@ export default function AdminUsersPage() {
       </Card>
 
       {selected ? (
+        <div ref={editRef}>
         <Card>
           <Section
             title={`Editar ${selected.email}`}
@@ -612,6 +618,7 @@ export default function AdminUsersPage() {
             </form>
           </Section>
         </Card>
+        </div>
       ) : null}
 
       {selected ? (
