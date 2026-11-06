@@ -181,7 +181,11 @@ export default function ServiceAccountsPage() {
       );
       reload();
     } catch (caught) {
-      setActionError(caught instanceof ApiError ? caught.message : "No se pudo archivar la cuenta.");
+      if (caught instanceof ApiError && caught.code === "reauth_required") {
+        setActionError("La cuenta no se archivó. Confirme su contraseña para continuar.");
+      } else {
+        setActionError(caught instanceof ApiError ? caught.message : "No se pudo archivar la cuenta.");
+      }
     }
   }
 
