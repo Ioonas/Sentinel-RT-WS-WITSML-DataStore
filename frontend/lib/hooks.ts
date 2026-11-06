@@ -28,7 +28,8 @@ export function useApiQuery<T>(path: string | null) {
       .catch((caught: unknown) => {
         if (cancelled) return;
         if (caught instanceof ApiError && caught.status === 401) {
-          window.location.href = "/admin/login";
+          // La cookie puede seguir en el navegador aunque el servidor ya no la acepte.
+          window.location.href = "/admin/session-end";
           return;
         }
         setError(

@@ -36,6 +36,21 @@ export default function LoginPage() {
     server_description: "",
   });
 
+  const [sessionEnded, setSessionEnded] = useState(false);
+
+  useEffect(() => {
+    // Llegó desde una sesión que el servidor ya no reconoce: se limpia lo guardado localmente.
+    if (new URLSearchParams(window.location.search).get("reason") === "session_ended") {
+      setSessionEnded(true);
+      try {
+        window.sessionStorage.clear();
+        window.localStorage.clear();
+      } catch {
+        // Sin acceso al almacenamiento del navegador: el aviso se muestra igual.
+      }
+    }
+  }, []);
+
   useEffect(() => {
     api<SetupStatus>("/setup/status")
       .then((status) => setSetupCompleted(status.setup_completed))
@@ -97,6 +112,11 @@ export default function LoginPage() {
         {setupCompleted === null && !error ? <p className={styles.note}>Comprobando configuración…</p> : null}
 
         {error ? <Alert>{error}</Alert> : null}
+        {sessionEnded ? (
+          <Alert tone="warn">
+            Su sesión terminó. Si su cuenta fue eliminada, ya no puede iniciar sesión; contacte a un superadministrador.
+          </Alert>
+        ) : null}
 
         <form className={styles.form} onSubmit={submit}>
           {setupCompleted === false ? (

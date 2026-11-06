@@ -520,6 +520,7 @@ async def delete_admin_user(
     services: RequestServices = Depends(get_services),
 ) -> Response:
     user = await services.identities.delete_admin_user(user_id, auth.principal.id)
+    await services.mail.enqueue_account_deleted(user.email)
     await audit(
         services,
         auth,

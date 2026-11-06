@@ -5,6 +5,7 @@ const PUBLIC_PREFIXES = [
   "/admin/recover",
   "/admin/reset-password",
   "/admin/accept-invitation",
+  "/admin/session-end",
 ];
 
 export function middleware(request: NextRequest) {
@@ -16,13 +17,6 @@ export function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
     url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  if (hasSession && isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/admin/overview";
-    url.search = "";
     return NextResponse.redirect(url);
   }
 

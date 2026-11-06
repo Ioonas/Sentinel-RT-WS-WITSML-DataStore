@@ -269,6 +269,22 @@ class MailService:
             )
         )
 
+    async def enqueue_account_deleted(self, recipient: str) -> None:
+        await self._outbox.enqueue(
+            MailJob(
+                id=self._ids.new_uid(),
+                kind=MailKind.ACCOUNT_DELETED.value,
+                recipient=recipient,
+                subject="Cuenta eliminada - Sentinel RT&WS WITSML DataStore",
+                body=(
+                    "Su cuenta de administración fue eliminada y sus sesiones se cerraron.\n"
+                    "Ya no puede iniciar sesión. Si cree que fue un error, "
+                    "contacte a un superadministrador.\n"
+                ),
+                created_at=self._clock.now(),
+            )
+        )
+
     async def enqueue_recovery(self, recipient: str, token: str) -> None:
         link = f"{self._base}/admin/reset-password?token={token}"
         await self._outbox.enqueue(
