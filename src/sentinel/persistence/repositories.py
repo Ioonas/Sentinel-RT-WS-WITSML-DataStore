@@ -1206,6 +1206,13 @@ class SqlAlchemyIdentityRepository:
             .values(revoked_at=revoked_at)
         )
 
+    async def delete_admin_user(self, user_id: str) -> None:
+        # Las sesiones y los restablecimientos pendientes referencian al usuario (RESTRICT).
+        for row_type in (PasswordResetRow, AdminSessionRow):
+            await self._session.execute(delete(row_type).where(row_type.user_id == user_id))
+        await self._session.execute(delete(AdminUserRow).where(AdminUserRow.id == user_id))
+        await self._session.flush()
+
     async def revoke_user_sessions(self, user_id: str, revoked_at: datetime) -> None:
         await self._session.execute(
             update(AdminSessionRow)

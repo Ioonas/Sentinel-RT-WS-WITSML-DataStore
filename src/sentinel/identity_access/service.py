@@ -412,6 +412,24 @@ class IdentityService:
     async def list_own_sessions(self, user_id: str) -> list[SessionRecord]:
         return await self._repo.list_user_sessions(user_id, self._clock.now())
 
+    async def delete_admin_user(self, user_id: str, actor_id: str) -> AdminUserRecord:
+        """Elimina una cuenta humana. No puede eliminarse a sí misma ni dejar sin superadmin."""
+        if user_id == actor_id:
+            raise ValidationError("No puede eliminar su propia cuenta.")
+        user = await self._repo.get_admin_user(user_id)
+        if user is None:
+            raise NotFoundError("Usuario administrativo no encontrado.")
+        if user.role == HumanRole.SUPERADMIN and user.enabled:
+            others = [
+                item
+                for item in await self._repo.list_admin_users()
+                if item.role == HumanRole.SUPERADMIN and item.enabled and item.id != user_id
+            ]
+            if not others:
+                raise ConflictError("Debe quedar al menos un superadministrador activo.")
+        await self._repo.delete_admin_user(user_id)
+        return user
+
     async def revoke_own_session(
         self, *, user_id: str, reference: str, current_token_hash: str
     ) -> SessionRecord:

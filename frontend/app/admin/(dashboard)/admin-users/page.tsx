@@ -253,6 +253,31 @@ export default function AdminUsersPage() {
     });
   }
 
+  function askDeleteUser() {
+    if (!selected) return;
+    setConfirmingUserSession({
+      title: "Eliminar cuenta",
+      description: `Se eliminará ${selected.email} y sus sesiones. Esta acción no se puede deshacer. Las invitaciones y el historial de auditoría se conservan.`,
+      confirmLabel: "Eliminar cuenta",
+      run: deleteSelectedUser,
+    });
+  }
+
+  async function deleteSelectedUser() {
+    if (!selected) return;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await runWithReauth(() => api(`/admin-users/${selected.id}`, { method: "DELETE" }));
+      setSelectedId(null);
+      users.reload();
+    } catch (caught) {
+      setEditError(caught instanceof ApiError ? caught.message : "No se pudo eliminar la cuenta.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   function askCloseAllUserSessions() {
     const count = (userSessions.data ?? []).filter((item) => !item.current).length;
     setConfirmingUserSession({
@@ -613,6 +638,9 @@ export default function AdminUsersPage() {
               <div className={styles.actions}>
                 <Button type="submit" variant="primary" disabled={editBusy}>
                   {editBusy ? "Guardando…" : "Guardar cambios"}
+                </Button>
+                <Button type="button" variant="danger" disabled={editBusy} onClick={askDeleteUser}>
+                  Eliminar cuenta
                 </Button>
               </div>
             </form>

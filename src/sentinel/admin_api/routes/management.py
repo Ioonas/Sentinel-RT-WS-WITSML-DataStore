@@ -510,6 +510,28 @@ async def admin_revoke_user_session(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.delete("/admin-users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin_user(
+    user_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> Response:
+    user = await services.identities.delete_admin_user(user_id, auth.principal.id)
+    await audit(
+        services,
+        auth,
+        action="admin-user.deleted",
+        correlation=correlation_id(request),
+        object_type="admin_user",
+        object_uid=user_id,
+        details={"target": user.email, "role": user.role.value},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/admin-users/{user_id}/sessions/revoke-all", response_model=MessageView)
 async def admin_revoke_all_user_sessions(
     user_id: str,
