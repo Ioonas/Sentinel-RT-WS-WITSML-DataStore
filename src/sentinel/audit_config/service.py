@@ -228,12 +228,13 @@ class MailService:
         outbox: MailOutboxPort,
         clock: Clock,
         ids: IdGenerator,
-        public_base_url: str,
+        admin_base_url: str,
     ) -> None:
         self._outbox = outbox
         self._clock = clock
         self._ids = ids
-        self._base = public_base_url.rstrip("/")
+        # Las ligas de correo abren páginas del frontend de administración, no de la API.
+        self._base = admin_base_url.rstrip("/")
 
     async def enqueue_invitation(self, recipient: str, token: str) -> None:
         link = f"{self._base}/admin/accept-invitation?token={token}"

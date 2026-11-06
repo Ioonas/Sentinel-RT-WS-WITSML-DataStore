@@ -86,9 +86,8 @@ class Container:
             setup = SetupService(
                 config, identities, audit, self.clock, smtp_check=self.smtp_check
             )
-            mail = MailService(
-                repos.mail, self.clock, self.ids, self.settings.public_base_url
-            )
+            admin_base_url = self.settings.admin_origin.split(",")[0].strip()
+            mail = MailService(repos.mail, self.clock, self.ids, admin_base_url)
             witsml = WitsmlStoreService(
                 wells=repos.wells,
                 wellbores=repos.wellbores,
