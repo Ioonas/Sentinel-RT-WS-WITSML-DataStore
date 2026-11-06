@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from sentinel.identity_access.compromised import (
@@ -332,7 +332,7 @@ class IdentityService:
         return LoginResult(
             token=token,
             csrf_token=csrf,
-            principal=user.to_principal(),
+            principal=await self.human_principal(user),
             expires_at=expires_at,
         )
 
@@ -347,7 +347,31 @@ class IdentityService:
         user = await self._repo.get_admin_user(session.user_id)
         if user is None or not user.enabled:
             return None
-        return user.to_principal(), session
+        return await self.human_principal(user), session
+
+    async def human_principal(self, user: AdminUserRecord) -> Principal:
+        """Identidad de un usuario administrativo, con su alcance de pozos.
+
+        Falla cerrada: sin vínculo a una cuenta de servicio habilitada, una persona no ve
+        ningún pozo. El superadministrador no tiene restricción.
+        """
+        if user.role == HumanRole.SUPERADMIN:
+            return user.to_principal(well_scope=None)
+        scope: frozenset[str] = frozenset()
+        if user.role == HumanRole.LINKED_READER and user.linked_service_account_id:
+            account = await self._repo.get_service_account(user.linked_service_account_id)
+            if (
+                account is not None
+                and account.enabled
+                and not account.is_archived
+                and account.well_scope is not None
+            ):
+                scope = account.well_scope
+        principal = user.to_principal(well_scope=scope)
+        if user.role == HumanRole.LINKED_READER:
+            # Los permisos del rol vinculado son fijos: no dependen de lo guardado.
+            principal = replace(principal, permissions=permissions_for_role(user.role.value))
+        return principal
 
     async def reauthenticate(self, *, user_id: str, password: str, token_hash: str) -> None:
         """Renueva la ventana de reautenticación de la sesión actual."""
@@ -445,8 +469,14 @@ class IdentityService:
         if user is None:
             raise NotFoundError("Usuario administrativo no encontrado.")
         effective_role = role or user.role
+        if effective_role == HumanRole.LINKED_READER and user.role != HumanRole.LINKED_READER:
+            raise ValidationError(
+                "Este rol solo se asigna al dar acceso web desde una cuenta de servicio."
+            )
         delegated = self._validate_delegated_permissions(effective_role, permissions)
         if effective_role != user.role:
+            if user.role == HumanRole.LINKED_READER:
+                user.linked_service_account_id = None
             user.role = effective_role
             user.permissions = permissions_for_role(effective_role.value, sorted(delegated))
         elif permissions is not None:
@@ -483,6 +513,10 @@ class IdentityService:
         created_by: str,
         permissions: set[str] | None = None,
     ) -> tuple[InvitationRecord, str]:
+        if role == HumanRole.LINKED_READER:
+            raise ValidationError(
+                "Este rol solo se asigna al dar acceso web desde una cuenta de servicio."
+            )
         normalized = email.strip().lower()
         if not _EMAIL.match(normalized):
             raise ValidationError("El correo no tiene un formato válido.")
@@ -495,6 +529,53 @@ class IdentityService:
             permissions=permissions,
         )
 
+    async def invite_linked_user(
+        self, *, account_id: str, email: str, created_by: str
+    ) -> tuple[InvitationRecord, str]:
+        """Invitación de acceso web: la persona verá solo los pozos de la cuenta."""
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        if account.is_archived or not account.enabled:
+            raise ConflictError("La cuenta está deshabilitada o archivada.")
+        if account.well_scope is None:
+            raise ConflictError(
+                "La cuenta ve todos los pozos. Defina un alcance antes de dar acceso web."
+            )
+        normalized = email.strip().lower()
+        if not _EMAIL.match(normalized):
+            raise ValidationError("El correo no tiene un formato válido.")
+        if await self._repo.get_admin_user_by_email(normalized) is not None:
+            raise ConflictError("Ya existe un usuario con ese correo.")
+        return await self._issue_invitation(
+            email=normalized,
+            role=HumanRole.LINKED_READER,
+            created_by=created_by,
+            permissions=None,
+            linked_service_account_id=account.id,
+        )
+
+    async def linked_account_name(self, user: AdminUserRecord) -> str | None:
+        if user.role != HumanRole.LINKED_READER or not user.linked_service_account_id:
+            return None
+        account = await self._repo.get_service_account(user.linked_service_account_id)
+        return account.name if account is not None else None
+
+    async def list_web_access(self, account_id: str) -> list[AdminUserRecord]:
+        if await self._repo.get_service_account(account_id) is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        return await self._repo.list_admin_users_linked_to(account_id)
+
+    async def remove_web_access(self, *, account_id: str, user_id: str) -> AdminUserRecord:
+        """Desvincula a la persona: deja de ver pozos y se cierran sus sesiones."""
+        user = await self._repo.get_admin_user(user_id)
+        if user is None or user.linked_service_account_id != account_id:
+            raise NotFoundError("La persona no tiene acceso web vinculado a esta cuenta.")
+        user.linked_service_account_id = None
+        await self._repo.save_admin_user(user)
+        await self._repo.revoke_user_sessions(user.id, self._clock.now())
+        return user
+
     async def _issue_invitation(
         self,
         *,
@@ -502,6 +583,7 @@ class IdentityService:
         role: HumanRole,
         created_by: str,
         permissions: set[str] | None,
+        linked_service_account_id: str | None = None,
     ) -> tuple[InvitationRecord, str]:
         delegated = self._validate_delegated_permissions(role, permissions)
         token = self._ids.new_token()
@@ -515,6 +597,7 @@ class IdentityService:
             created_by=created_by,
             permissions=permissions_for_role(role.value, sorted(delegated)),
             created_at=now,
+            linked_service_account_id=linked_service_account_id,
         )
         await self._repo.save_invitation(invitation)
         return invitation, token
@@ -539,6 +622,7 @@ class IdentityService:
             role=previous.role,
             created_by=created_by,
             permissions=delegated,
+            linked_service_account_id=previous.linked_service_account_id,
         )
 
     async def _open_invitation(self, invitation_id: str) -> InvitationRecord:
@@ -577,6 +661,7 @@ class IdentityService:
             enabled=True,
             permissions=invitation.permissions,
             created_at=now,
+            linked_service_account_id=invitation.linked_service_account_id,
         )
         await self._repo.save_admin_user(user)
         await self._repo.mark_invitation_accepted(invitation.id, now)

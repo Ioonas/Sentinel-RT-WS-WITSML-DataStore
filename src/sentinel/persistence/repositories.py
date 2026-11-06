@@ -1132,6 +1132,14 @@ class SqlAlchemyIdentityRepository:
         rows = (await self._session.scalars(select(AdminUserRow))).all()
         return [self._to_admin(row) for row in rows]
 
+    async def list_admin_users_linked_to(self, account_id: str) -> list[AdminUserRecord]:
+        rows = (
+            await self._session.scalars(
+                select(AdminUserRow).where(AdminUserRow.linked_service_account_id == account_id)
+            )
+        ).all()
+        return [self._to_admin(row) for row in rows]
+
     async def save_admin_user(self, user: AdminUserRecord) -> None:
         row = await self._session.get(AdminUserRow, user.id)
         if row is None:
@@ -1148,6 +1156,7 @@ class SqlAlchemyIdentityRepository:
         row.last_login_at = user.last_login_at
         row.failed_attempts = user.failed_attempts
         row.locked_until = user.locked_until
+        row.linked_service_account_id = user.linked_service_account_id
         await self._session.flush()
 
     async def count_admin_users(self) -> int:
@@ -1255,6 +1264,7 @@ class SqlAlchemyIdentityRepository:
                 expires_at=invitation.expires_at,
                 created_by=invitation.created_by,
                 created_at=invitation.created_at,
+                linked_service_account_id=invitation.linked_service_account_id,
             )
         )
         await self._session.flush()
@@ -1393,6 +1403,7 @@ class SqlAlchemyIdentityRepository:
             last_login_at=row.last_login_at,
             failed_attempts=row.failed_attempts,
             locked_until=row.locked_until,
+            linked_service_account_id=row.linked_service_account_id,
         )
 
 
@@ -1523,4 +1534,5 @@ def _to_invitation(row: InvitationRow) -> InvitationRecord:
         accepted_at=row.accepted_at,
         created_at=row.created_at,
         revoked_at=row.revoked_at,
+        linked_service_account_id=row.linked_service_account_id,
     )

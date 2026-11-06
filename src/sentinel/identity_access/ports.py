@@ -74,14 +74,18 @@ class AdminUserRecord:
     last_login_at: datetime | None = None
     failed_attempts: int = 0
     locked_until: datetime | None = None
+    # Cuenta de servicio cuyo alcance de pozos hereda (solo lector_vinculado).
+    linked_service_account_id: str | None = None
 
-    def to_principal(self) -> Principal:
+    def to_principal(self, *, well_scope: frozenset[str] | None = frozenset()) -> Principal:
+        """Identidad humana. Sin alcance explícito, no ve ningún pozo (falla cerrada)."""
         return Principal(
             id=self.id,
             name=self.email,
             kind=PrincipalKind.HUMAN,
             role=self.role.value,
             permissions=self.permissions,
+            well_scope=well_scope,
         )
 
 
@@ -108,6 +112,8 @@ class InvitationRecord:
     accepted_at: datetime | None = None
     created_at: datetime | None = None
     revoked_at: datetime | None = None
+    # Solo para invitaciones de acceso web vinculado (rol lector_vinculado).
+    linked_service_account_id: str | None = None
 
 
 @dataclass
@@ -135,6 +141,8 @@ class IdentityRepositoryPort(Protocol):
     async def get_admin_user(self, user_id: str) -> AdminUserRecord | None: ...
 
     async def list_admin_users(self) -> list[AdminUserRecord]: ...
+
+    async def list_admin_users_linked_to(self, account_id: str) -> list[AdminUserRecord]: ...
 
     async def save_admin_user(self, user: AdminUserRecord) -> None: ...
 

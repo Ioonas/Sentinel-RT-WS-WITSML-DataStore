@@ -183,6 +183,11 @@ export default function ObjectsPage() {
         actions={<StatusBadge status="neutral" label={OBJECT_TYPE_LABELS[objectType] ?? objectType} />}
       />
 
+      {profile.data?.linked_service_account ? (
+        <Alert tone="ok">
+          Viendo datos de la cuenta de servicio <strong>{profile.data.linked_service_account}</strong>. Solo lectura, y solo los pozos que esa cuenta crea.
+        </Alert>
+      ) : null}
       {message ? <Alert tone="ok">{message}</Alert> : null}
       {actionError ? <Alert>{actionError}</Alert> : null}
       {results.error ? <Alert>{results.error.message}</Alert> : null}

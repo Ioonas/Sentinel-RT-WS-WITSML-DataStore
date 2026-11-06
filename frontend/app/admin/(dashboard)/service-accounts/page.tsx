@@ -13,7 +13,10 @@ import {
   api,
   type CredentialView,
   type Grant,
+  type InvitationView,
+  type MessageView,
   type ServiceAccountView,
+  type WebAccessUserView,
 } from "@/lib/api";
 import { WellPicker } from "@/components/WellPicker";
 import { formatDateTime } from "@/lib/format";
@@ -63,6 +66,13 @@ export default function ServiceAccountsPage() {
   const [created, setCreated] = useState<CreatedAccount | null>(null);
   const [rotated, setRotated] = useState<{ name: string; secret: string | null } | null>(null);
   const [rotating, setRotating] = useState<ServiceAccountView | null>(null);
+  const [webAccount, setWebAccount] = useState<ServiceAccountView | null>(null);
+  const [webUsers, setWebUsers] = useState<WebAccessUserView[]>([]);
+  const [webEmail, setWebEmail] = useState("");
+  const [webBusy, setWebBusy] = useState(false);
+  const [webError, setWebError] = useState<string | null>(null);
+  const [webMessage, setWebMessage] = useState<string | null>(null);
+  const [webRemoving, setWebRemoving] = useState<WebAccessUserView | null>(null);
   const [rotateCredential, setRotateCredential] = useState("");
   const [rotateConfirm, setRotateConfirm] = useState("");
   const [rotateBusy, setRotateBusy] = useState(false);
@@ -256,6 +266,70 @@ export default function ServiceAccountsPage() {
     }
   }
 
+  async function loadWebAccess(account: ServiceAccountView) {
+    try {
+      setWebUsers(await api<WebAccessUserView[]>(`/service-accounts/${account.id}/web-access`));
+    } catch (caught) {
+      setWebError(caught instanceof ApiError ? caught.message : "No se pudieron cargar las personas con acceso.");
+    }
+  }
+
+  function openWebAccess(account: ServiceAccountView) {
+    setWebAccount(account);
+    setWebEmail("");
+    setWebError(null);
+    setWebMessage(null);
+    setWebUsers([]);
+    void loadWebAccess(account);
+  }
+
+  function closeWebAccess() {
+    setWebAccount(null);
+    setWebRemoving(null);
+  }
+
+  async function inviteWebAccess(event: FormEvent) {
+    event.preventDefault();
+    if (!webAccount) return;
+    setWebBusy(true);
+    setWebError(null);
+    setWebMessage(null);
+    try {
+      const invitation = await runWithReauth(() =>
+        api<InvitationView>(`/service-accounts/${webAccount.id}/web-access`, {
+          method: "POST",
+          body: JSON.stringify({ email: webEmail.trim() }),
+        }),
+      );
+      setWebMessage(`Invitación enviada a ${invitation.email}. Vence en 72 horas.`);
+      setWebEmail("");
+    } catch (caught) {
+      setWebError(caught instanceof ApiError ? caught.message : "No se pudo crear la invitación.");
+    } finally {
+      setWebBusy(false);
+    }
+  }
+
+  async function removeWebAccess() {
+    if (!webAccount || !webRemoving) return;
+    setWebBusy(true);
+    setWebError(null);
+    try {
+      const result = await runWithReauth(() =>
+        api<MessageView>(`/service-accounts/${webAccount.id}/web-access/${webRemoving.id}`, {
+          method: "DELETE",
+        }),
+      );
+      setWebMessage(result.message);
+      setWebRemoving(null);
+      await loadWebAccess(webAccount);
+    } catch (caught) {
+      setWebError(caught instanceof ApiError ? caught.message : "No se pudo quitar el acceso.");
+    } finally {
+      setWebBusy(false);
+    }
+  }
+
   function runConfirmed() {
     const request = confirming;
     setConfirming(null);
@@ -264,6 +338,81 @@ export default function ServiceAccountsPage() {
 
   return (
     <div className={styles.stack}>
+      {webAccount ? (
+        <>
+          <ModalDialog titleId="web-access-title" wide busy={webBusy} onClose={closeWebAccess}>
+            <h2 id="web-access-title" className={dialogStyles.title}>
+              Acceso web a «{webAccount.name}»
+            </h2>
+            <p className={dialogStyles.text}>
+              Las personas invitadas entran a la interfaz web y ven solo los pozos que crea esta cuenta, en modo lectura.
+            </p>
+            {webError ? <Alert>{webError}</Alert> : null}
+            {webMessage ? <Alert tone="ok">{webMessage}</Alert> : null}
+            <div className={styles.stack}>
+              <span className={styles.groupLabel}>Personas con acceso</span>
+              {webUsers.length > 0 ? (
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <tbody>
+                      {webUsers.map((user) => (
+                        <tr key={user.id}>
+                          <td className={styles.wrap}>{user.email}</td>
+                          <td>
+                            <StatusBadge
+                              status={user.enabled ? "ok" : "danger"}
+                              label={user.enabled ? "Activa" : "Deshabilitada"}
+                            />
+                          </td>
+                          <td>
+                            <Button size="sm" variant="danger" disabled={webBusy} onClick={() => setWebRemoving(user)}>
+                              Quitar acceso
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className={styles.faint}>Nadie tiene acceso web todavía.</p>
+              )}
+            </div>
+            <form className={dialogStyles.form} onSubmit={inviteWebAccess}>
+              <Field label="Correo de la persona" htmlFor="web-access-email" hint="Recibe una invitación que vence en 72 horas.">
+                <Input
+                  id="web-access-email"
+                  type="email"
+                  required
+                  data-initial-focus
+                  value={webEmail}
+                  onChange={(event) => setWebEmail(event.target.value)}
+                />
+              </Field>
+              <div className={dialogStyles.actions}>
+                <Button variant="ghost" disabled={webBusy} onClick={closeWebAccess}>
+                  Cerrar
+                </Button>
+                <Button type="submit" variant="primary" disabled={webBusy || !webEmail.trim()}>
+                  {webBusy ? "Enviando…" : "Invitar"}
+                </Button>
+              </div>
+            </form>
+          </ModalDialog>
+          {webRemoving ? (
+            <ConfirmDialog
+              title="Quitar acceso web"
+              description={`${webRemoving.email} dejará de ver los datos de «${webAccount.name}». Sus sesiones se cerrarán.`}
+              confirmLabel="Quitar acceso"
+              tone="danger"
+              busy={webBusy}
+              onConfirm={() => void removeWebAccess()}
+              onCancel={() => setWebRemoving(null)}
+            />
+          ) : null}
+        </>
+      ) : null}
+
       {rotating ? (
         <ModalDialog titleId="rotate-title" wide busy={rotateBusy} onClose={closeRotate}>
           <h2 id="rotate-title" className={dialogStyles.title}>
@@ -473,6 +622,7 @@ export default function ServiceAccountsPage() {
                               subject={account.name}
                               items={[
                                 { label: "Editar", onSelect: () => openEdit(account) },
+                                { label: "Acceso web", onSelect: () => openWebAccess(account) },
                                 {
                                   label: account.enabled ? "Deshabilitar" : "Habilitar",
                                   onSelect: () => toggle(account),

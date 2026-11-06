@@ -40,6 +40,8 @@ class UserView(BaseModel):
 class SessionView(BaseModel):
     user: UserView
     expires_at: datetime | None = None
+    # Solo para acceso web vinculado: cuenta de servicio cuyos datos se ven.
+    linked_service_account: str | None = None
 
 
 class LoginRequest(StrictModel):
@@ -164,6 +166,17 @@ class InvitationView(BaseModel):
     role: str
     expires_at: datetime
     token: str | None = None
+
+
+class WebAccessInviteRequest(StrictModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class WebAccessUserView(BaseModel):
+    id: str
+    email: str
+    display_name: str
+    enabled: bool
 
 
 class InvitationSummaryView(BaseModel):

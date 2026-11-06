@@ -39,9 +39,12 @@ const HUMAN_ROLES = [
   { value: "administrador_seguridad", label: "Administrador de seguridad" },
 ];
 
+/** Rol que solo se asigna al dar acceso web vinculado (no se elige en invitaciones). */
+const LINKED_ROLE = { value: "lector_vinculado", label: "Lector vinculado (cuenta de servicio)" };
+
 /** Nombre visible de un rol; si el valor no está en el catálogo se muestra tal cual. */
 function roleLabel(value: string) {
-  return HUMAN_ROLES.find((item) => item.value === value)?.label ?? value;
+  return [...HUMAN_ROLES, LINKED_ROLE].find((item) => item.value === value)?.label ?? value;
 }
 
 type ConfirmRequest = {
@@ -563,8 +566,12 @@ export default function AdminUsersPage() {
                   <Select
                     id="edit-role"
                     value={editRole}
+                    disabled={editRole === LINKED_ROLE.value}
                     onChange={(event) => setEditRole(event.target.value)}
                   >
+                    {editRole === LINKED_ROLE.value ? (
+                      <option value={LINKED_ROLE.value}>{LINKED_ROLE.label}</option>
+                    ) : null}
                     {HUMAN_ROLES.map((item) => (
                       <option key={item.value} value={item.value}>
                         {item.label}

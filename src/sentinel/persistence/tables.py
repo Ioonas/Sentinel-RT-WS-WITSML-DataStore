@@ -241,6 +241,7 @@ class AdminUserRow(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    linked_service_account_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class AdminSessionRow(Base):
@@ -271,6 +272,7 @@ class InvitationRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    linked_service_account_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class PasswordResetRow(Base):

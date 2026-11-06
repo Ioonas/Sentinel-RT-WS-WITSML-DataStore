@@ -80,7 +80,19 @@ export type UserView = {
   last_login_at: string | null;
 };
 
-export type SessionView = { user: UserView; expires_at: string | null };
+export type SessionView = {
+  user: UserView;
+  expires_at: string | null;
+  /** Solo acceso web vinculado: nombre de la cuenta de servicio cuyos datos se ven. */
+  linked_service_account?: string | null;
+};
+
+export type WebAccessUserView = {
+  id: string;
+  email: string;
+  display_name: string;
+  enabled: boolean;
+};
 
 export type ProfileSessionView = {
   reference: string;

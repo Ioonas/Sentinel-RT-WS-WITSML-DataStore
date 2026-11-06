@@ -40,6 +40,8 @@ class HumanRole(StrEnum):
     AUDITOR = "auditor"
     OPERATOR = "operador"
     SECURITY_ADMIN = "administrador_seguridad"
+    # No se invita directamente: solo se asigna al vincular una cuenta de servicio.
+    LINKED_READER = "lector_vinculado"
 
 
 class ServiceRole(StrEnum):
@@ -66,6 +68,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     # El rol administrador solo recibe los permisos que un superadministrador le
     # delegue explícitamente (columna permissions del usuario).
     HumanRole.ADMIN.value: frozenset(),
+    # Persona vinculada a una cuenta de servicio: solo lee objetos, y solo los del alcance
+    # de esa cuenta (ver AdminUserRecord / IdentityService.human_principal).
+    HumanRole.LINKED_READER.value: frozenset({AdminPermission.OBJECTS_READ.value}),
 }
 
 SUPPORTED_WITSML_OBJECTS: tuple[str, ...] = (

@@ -42,6 +42,8 @@ from sentinel.admin_api.schemas import (
     ServiceAccountView,
     ServiceInfoUpdateRequest,
     UserView,
+    WebAccessInviteRequest,
+    WebAccessUserView,
 )
 from sentinel.audit_config.domain import AuditEvent, ServerConfig
 from sentinel.bootstrap.container import RequestServices
@@ -738,3 +740,90 @@ async def mail_outbox_status(
 ) -> MessageView:
     pending = await services.repos.mail.pending_count()
     return MessageView(message=f"Correos pendientes: {pending}")
+
+
+@router.get(
+    "/service-accounts/{account_id}/web-access",
+    response_model=list[WebAccessUserView],
+)
+async def list_web_access(
+    account_id: str,
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    services: RequestServices = Depends(get_services),
+) -> list[WebAccessUserView]:
+    users = await services.identities.list_web_access(account_id)
+    return [
+        WebAccessUserView(
+            id=user.id,
+            email=user.email,
+            display_name=user.display_name,
+            enabled=user.enabled,
+        )
+        for user in users
+    ]
+
+
+@router.post(
+    "/service-accounts/{account_id}/web-access",
+    response_model=InvitationView,
+    status_code=status.HTTP_201_CREATED,
+)
+async def invite_web_access(
+    account_id: str,
+    payload: WebAccessInviteRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> InvitationView:
+    invitation, token = await services.identities.invite_linked_user(
+        account_id=account_id,
+        email=payload.email,
+        created_by=auth.principal.id,
+    )
+    await services.mail.enqueue_invitation(invitation.email, token)
+    await audit(
+        services,
+        auth,
+        action="service-account.web-access.invited",
+        correlation=correlation_id(request),
+        object_type="service_account",
+        object_uid=account_id,
+        details={"email": invitation.email},
+    )
+    settings = request.app.state.container.settings
+    return InvitationView(
+        id=invitation.id,
+        email=invitation.email,
+        role=invitation.role.value,
+        expires_at=invitation.expires_at,
+        token=token if settings.is_development else None,
+    )
+
+
+@router.delete(
+    "/service-accounts/{account_id}/web-access/{user_id}",
+    response_model=MessageView,
+)
+async def remove_web_access(
+    account_id: str,
+    user_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> MessageView:
+    user = await services.identities.remove_web_access(account_id=account_id, user_id=user_id)
+    await audit(
+        services,
+        auth,
+        action="service-account.web-access.removed",
+        correlation=correlation_id(request),
+        object_type="service_account",
+        object_uid=account_id,
+        details={"email": user.email},
+    )
+    await services.mail.enqueue_sessions_closed(user.email, 1)
+    return MessageView(message=f"Se quitó el acceso web de {user.email}.")

@@ -243,7 +243,11 @@ async def get_profile(
     services: RequestServices = Depends(get_services),
 ) -> SessionView:
     user = await services.identities.get_admin_user(auth.principal.id)
-    return SessionView(user=user_view(user), expires_at=auth.session.expires_at)
+    return SessionView(
+        user=user_view(user),
+        expires_at=auth.session.expires_at,
+        linked_service_account=await services.identities.linked_account_name(user),
+    )
 
 
 async def _notify_sessions_closed(services: RequestServices, user_id: str, closed: int) -> None:
