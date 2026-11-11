@@ -1416,6 +1416,21 @@ class SqlAlchemyIdentityRepository:
         )
 
 
+def _mail_job(row: MailOutboxRow) -> MailJob:
+    return MailJob(
+        id=row.id,
+        kind=row.kind,
+        recipient=row.recipient,
+        subject=row.subject,
+        body=row.body,
+        status=row.status,
+        attempts=row.attempts,
+        next_attempt_at=row.next_attempt_at,
+        last_error=row.last_error,
+        created_at=row.created_at,
+    )
+
+
 class SqlAlchemyMailOutbox:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -1490,6 +1505,41 @@ class SqlAlchemyMailOutbox:
         else:
             row.status = "pending"
             row.next_attempt_at = next_attempt_at
+
+    async def get_job(self, job_id: str) -> MailJob | None:
+        row = await self._session.get(MailOutboxRow, job_id)
+        return None if row is None else _mail_job(row)
+
+    async def list_jobs(
+        self,
+        *,
+        status: str | None,
+        kind: str | None,
+        before: datetime | None,
+        limit: int,
+    ) -> list[MailJob]:
+        stmt = select(MailOutboxRow)
+        if status is not None:
+            stmt = stmt.where(MailOutboxRow.status == status)
+        if kind is not None:
+            stmt = stmt.where(MailOutboxRow.kind == kind)
+        if before is not None:
+            stmt = stmt.where(MailOutboxRow.created_at < before)
+        stmt = stmt.order_by(MailOutboxRow.created_at.desc(), MailOutboxRow.id).limit(limit)
+        rows = await self._session.scalars(stmt)
+        return [_mail_job(row) for row in rows]
+
+    async def retry_job(self, job_id: str, now: datetime) -> bool:
+        # Condicional: un correo que ya está en "sending" o "sent" no se toca.
+        result = await self._session.execute(
+            update(MailOutboxRow)
+            .where(
+                MailOutboxRow.id == job_id,
+                MailOutboxRow.status.in_(("pending", "failed")),
+            )
+            .values(status="pending", next_attempt_at=now)
+        )
+        return result.rowcount == 1
 
     async def pending_count(self) -> int:
         return int(

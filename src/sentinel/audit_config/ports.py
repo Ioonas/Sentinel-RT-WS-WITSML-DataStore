@@ -46,4 +46,17 @@ class MailOutboxPort(Protocol):
 
     async def pending_count(self) -> int: ...
 
+    async def get_job(self, job_id: str) -> MailJob | None: ...
+
+    async def list_jobs(
+        self,
+        *,
+        status: str | None,
+        kind: str | None,
+        before: datetime | None,
+        limit: int,
+    ) -> list[MailJob]: ...
+
+    async def retry_job(self, job_id: str, now: datetime) -> bool: ...
+
     async def oldest_pending_at(self) -> datetime | None: ...

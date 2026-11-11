@@ -306,6 +306,24 @@ class AuditPage(BaseModel):
     next_cursor: int | None
 
 
+class MailOutboxView(BaseModel):
+    # Sin cuerpo: las invitaciones y recuperaciones llevan tokens.
+    id: str
+    kind: str
+    recipient: str
+    subject: str
+    status: str
+    attempts: int
+    next_attempt_at: datetime | None
+    last_error: str | None
+    created_at: datetime | None
+
+
+class MailOutboxPage(BaseModel):
+    items: list[MailOutboxView]
+    next_cursor: datetime | None
+
+
 class HealthView(BaseModel):
     status: str
 

@@ -267,6 +267,29 @@ class IdentityService:
         await self._repo.save_service_account(account)
         return account
 
+    async def restore_service_account(self, account_id: str) -> tuple[ServiceAccountRecord, str]:
+        """Restaura una cuenta archivada dentro del periodo de gracia, con credencial nueva.
+
+        La credencial anterior pudo quedar expuesta al archivar, por eso nunca se reutiliza.
+        """
+        account = await self._repo.get_service_account(account_id)
+        if account is None:
+            raise NotFoundError("Cuenta de servicio no encontrada.")
+        if not account.is_archived or account.archived_at is None:
+            raise ConflictError("La cuenta no está archivada.")
+        now = self._clock.now()
+        if account.archived_at + ARCHIVE_GRACE <= now:
+            raise ConflictError(
+                "El periodo de recuperación venció; la cuenta ya no puede restaurarse."
+            )
+        secret = self._new_secret()
+        account.credential_hash = self._hasher.hash(secret)
+        account.archived_at = None
+        account.enabled = True
+        account.rotated_at = now
+        await self._repo.save_service_account(account)
+        return account, secret
+
     async def revoke_credential(self, account_id: str) -> None:
         account = await self._repo.get_service_account(account_id)
         if account is None:
@@ -766,6 +789,21 @@ class IdentityService:
                 created_at=now,
             )
         )
+        return token, user
+
+    async def admin_password_reset(self, user_id: str) -> tuple[str, AdminUserRecord]:
+        """Un administrador inicia el restablecimiento de otro usuario.
+
+        Devuelve el token para enviarlo por correo; nunca se muestra en pantalla.
+        Cierra las sesiones del usuario objetivo de inmediato.
+        """
+        user = await self.get_admin_user(user_id)
+        if not user.enabled:
+            raise ConflictError("El usuario está deshabilitado.")
+        token, _ = await self.request_password_reset(user.email)
+        if token is None:
+            raise ConflictError("No se pudo iniciar el restablecimiento.")
+        await self._repo.revoke_user_sessions(user.id, self._clock.now())
         return token, user
 
     async def reset_password(self, token: str, new_password: str) -> None:

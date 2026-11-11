@@ -23,6 +23,8 @@ from sentinel.admin_api.schemas import (
     AdminUserUpdate,
     AuditEventView,
     AuditPage,
+    MailOutboxPage,
+    MailOutboxView,
     ContactUpdateRequest,
     CredentialView,
     GrantIn,
@@ -47,7 +49,7 @@ from sentinel.admin_api.schemas import (
     WebAccessListView,
     WebAccessUserView,
 )
-from sentinel.audit_config.domain import AuditEvent, ServerConfig
+from sentinel.audit_config.domain import AuditEvent, MailJob, ServerConfig
 from sentinel.bootstrap.container import RequestServices
 from sentinel.identity_access.domain import (
     ALL_ADMIN_PERMISSIONS,
@@ -57,7 +59,7 @@ from sentinel.identity_access.domain import (
 )
 from sentinel.identity_access.ports import AdminUserRecord, ServiceAccountRecord
 from sentinel.identity_access.service import ARCHIVE_GRACE, session_reference
-from sentinel.shared.errors import ValidationError
+from sentinel.shared.errors import ConflictError, ValidationError
 
 router = APIRouter(tags=["Administración"])
 
@@ -388,6 +390,34 @@ async def archive_service_account(
 
 
 @router.post(
+    "/service-accounts/{account_id}/restore",
+    response_model=ServiceAccountCreatedView,
+)
+async def restore_service_account(
+    account_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ServiceAccountCreatedView:
+    # Siempre emite credencial nueva: la anterior pudo quedar expuesta al archivar.
+    account, secret = await services.identities.restore_service_account(account_id)
+    await audit(
+        services,
+        auth,
+        action="service-account.restored",
+        correlation=correlation_id(request),
+        object_type="service_account",
+        object_uid=account.id,
+        details={"name": account.name},
+    )
+    return ServiceAccountCreatedView(
+        account=_account_view(account), credential=CredentialView(secret=secret)
+    )
+
+
+@router.post(
     "/service-accounts/{account_id}/revoke-credential",
     status_code=status.HTTP_204_NO_CONTENT,
 )
@@ -531,6 +561,34 @@ async def delete_admin_user(
         details={"target": user.email, "role": user.role.value},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/admin-users/{user_id}/reset-password", response_model=MessageView)
+async def admin_reset_user_password(
+    user_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> MessageView:
+    if user_id == auth.principal.id:
+        raise ConflictError(
+            "Para cambiar su propia contraseña use la sección Mi cuenta."
+        )
+    # El enlace va por correo; nunca se devuelve ni se muestra en pantalla.
+    token, user = await services.identities.admin_password_reset(user_id)
+    await services.mail.enqueue_recovery(user.email, token)
+    await audit(
+        services,
+        auth,
+        action="admin-user.password-reset-requested",
+        correlation=correlation_id(request),
+        object_type="admin_user",
+        object_uid=user_id,
+        details={"target": user.email},
+    )
+    return MessageView(message="Se envió un enlace de restablecimiento al correo del usuario.")
 
 
 @router.post("/admin-users/{user_id}/sessions/revoke-all", response_model=MessageView)
@@ -773,6 +831,60 @@ async def search_audit_events(
         end=end,
     )
     return AuditPage(items=[_audit_view(event) for event in events], next_cursor=next_cursor)
+
+
+def _mail_view(job: MailJob) -> MailOutboxView:
+    return MailOutboxView(
+        id=job.id,
+        kind=job.kind,
+        recipient=job.recipient,
+        subject=job.subject,
+        status=job.status,
+        attempts=job.attempts,
+        next_attempt_at=job.next_attempt_at,
+        last_error=job.last_error,
+        created_at=job.created_at,
+    )
+
+
+@router.get("/mail-outbox", response_model=MailOutboxPage)
+async def list_mail_outbox(
+    _: AuthContext = Depends(require_permission(AdminPermission.HEALTH_READ)),
+    services: RequestServices = Depends(get_services),
+    job_status: str | None = Query(
+        default=None, alias="status", pattern="^(pending|sending|sent|failed)$"
+    ),
+    kind: str | None = Query(default=None, max_length=32),
+    before: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> MailOutboxPage:
+    jobs = await services.mail.list_jobs(
+        status=job_status, kind=kind, before=before, limit=limit
+    )
+    next_cursor = jobs[-1].created_at if len(jobs) == limit else None
+    return MailOutboxPage(items=[_mail_view(job) for job in jobs], next_cursor=next_cursor)
+
+
+@router.post("/mail-outbox/{job_id}/retry", response_model=MailOutboxView)
+async def retry_mail_outbox(
+    job_id: str,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.IDENTITY_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> MailOutboxView:
+    job = await services.mail.retry_job(job_id)
+    await audit(
+        services,
+        auth,
+        action="mail.retried",
+        correlation=correlation_id(request),
+        object_type="mail_outbox",
+        object_uid=job_id,
+        details={"kind": job.kind},
+    )
+    return _mail_view(job)
 
 
 @router.get("/mail-outbox/pending", response_model=MessageView)

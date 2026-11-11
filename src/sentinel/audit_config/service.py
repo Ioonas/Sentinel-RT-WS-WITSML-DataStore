@@ -7,6 +7,7 @@ administración y ``WMLS_GetCap`` leen de aquí (DRY, §6).
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
@@ -26,7 +27,7 @@ from sentinel.audit_config.ports import (
 from sentinel.identity_access.domain import HumanRole
 from sentinel.identity_access.service import IdentityService
 from sentinel.shared.clock import Clock
-from sentinel.shared.errors import ConflictError, ValidationError
+from sentinel.shared.errors import ConflictError, NotFoundError, ValidationError
 from sentinel.shared.ids import IdGenerator
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -284,6 +285,31 @@ class MailService:
                 created_at=self._clock.now(),
             )
         )
+
+    async def list_jobs(
+        self,
+        *,
+        status: str | None,
+        kind: str | None,
+        before: datetime | None,
+        limit: int,
+    ) -> list[MailJob]:
+        # El cuerpo no se devuelve: las invitaciones y recuperaciones llevan tokens.
+        return await self._outbox.list_jobs(
+            status=status, kind=kind, before=before, limit=limit
+        )
+
+    async def retry_job(self, job_id: str) -> MailJob:
+        job = await self._outbox.get_job(job_id)
+        if job is None:
+            raise NotFoundError("Correo no encontrado.")
+        if job.status in ("sending", "sent"):
+            raise ConflictError("Solo se puede reintentar un correo pendiente o fallido.")
+        if not await self._outbox.retry_job(job_id, self._clock.now()):
+            raise ConflictError("El correo cambió de estado; vuelva a consultarlo.")
+        refreshed = await self._outbox.get_job(job_id)
+        assert refreshed is not None
+        return refreshed
 
     async def enqueue_recovery(self, recipient: str, token: str) -> None:
         link = f"{self._base}/admin/reset-password?token={token}"
