@@ -79,6 +79,7 @@ export default function ObjectsPage() {
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteDependencies, setDeleteDependencies] = useState<string[] | null>(null);
 
   function search(event: FormEvent) {
     event.preventDefault();
@@ -118,12 +119,22 @@ export default function ObjectsPage() {
     }
   }
 
-  function startDelete(item: ObjectView) {
+  async function startDelete(item: ObjectView) {
     setDeleteTarget(item);
+    setDeleteDependencies(null);
     setReason("");
     setConfirmation("");
     setActionError(null);
     setMessage(null);
+    try {
+      const result = await api<string[]>(
+        objectPath(item.object_type, item.uid, item.uid_well, item.uid_wellbore, "/dependencies"),
+      );
+      setDeleteDependencies(result);
+    } catch (caught) {
+      setDeleteTarget(null);
+      setActionError(caught instanceof ApiError ? caught.message : "No se pudieron comprobar las dependencias.");
+    }
   }
 
   async function createObject(event: FormEvent) {
@@ -158,7 +169,7 @@ export default function ObjectsPage() {
 
   async function remove(event: FormEvent) {
     event.preventDefault();
-    if (!deleteTarget) return;
+    if (!deleteTarget || !deleteDependencies || deleteDependencies.length > 0) return;
     setDeleteBusy(true);
     setActionError(null);
     try {
@@ -431,6 +442,21 @@ export default function ObjectsPage() {
           <p id="delete-object-description" className={dialogStyles.text}>
             El objeto se marca como eliminado, no se borra físicamente. Queda registrado en ChangeLog. Para confirmar, escriba su uid completo.
           </p>
+          {deleteDependencies === null ? (
+            <p className={dialogStyles.text}>Comprobando dependencias…</p>
+          ) : deleteDependencies.length > 0 ? (
+            <div className={dialogStyles.text}>
+              <p>
+                No se puede eliminar mientras existan objetos que dependen de este. Elimine primero estos {deleteDependencies.length} objeto(s):
+              </p>
+              <Tags values={deleteDependencies} />
+              <div className={dialogStyles.actions}>
+                <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          ) : (
           <form className={dialogStyles.form} onSubmit={remove}>
             <Field label="Motivo" htmlFor="delete-reason" hint="Mínimo 5 caracteres.">
               <Input
@@ -464,6 +490,7 @@ export default function ObjectsPage() {
               </Button>
             </div>
           </form>
+          )}
         </ModalDialog>
       ) : null}
     </div>

@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sentinel.identity_access.domain import Principal
-from sentinel.shared.errors import NotFoundError
-from sentinel.witsml_application.domain.codes import WmlsCode
-from sentinel.witsml_application.domain.errors import WitsmlError
+from sentinel.shared.errors import ConflictError, NotFoundError
 from sentinel.witsml_application.domain.models import ChangeLogRecord, StoredObject
 from sentinel.witsml_application.ports import (
     ChangeLogRepositoryPort,
@@ -155,10 +153,14 @@ class InventoryService:
         record = await self._get(object_type, uid, uid_well, uid_wellbore)
         if record is None:
             raise NotFoundError("Objeto no encontrado.")
-        if await self.dependencies(
+        dependencies = await self.dependencies(
             object_type, uid, uid_well=uid_well, uid_wellbore=uid_wellbore
-        ):
-            raise WitsmlError(WmlsCode.NOT_BOTTOM_LEVEL)
+        )
+        if dependencies:
+            raise ConflictError(
+                "No se puede eliminar: el objeto tiene dependientes que deben "
+                "eliminarse primero: " + ", ".join(dependencies) + "."
+            )
         element = parse_xml(record.xml)
         xd.ensure_namespace(element)
         if object_type == "well":
