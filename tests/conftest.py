@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from collections.abc import AsyncIterator
 
 import pytest
@@ -13,6 +15,11 @@ from sentinel.admin_api.app import create_app
 from sentinel.bootstrap.container import Container
 from sentinel.bootstrap.settings import Settings
 from sentinel.persistence.tables import Base
+
+# En Windows el loop Proactor (predeterminado) pierde conexiones TCP a PostgreSQL
+# cuando el pool vive toda la sesión de pruebas. El loop de selector evita el problema.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TEST_DSN = os.getenv(
     "SENTINEL_TEST_DSN",
