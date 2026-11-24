@@ -2,7 +2,7 @@
 
 import { permissionLabel } from "@/lib/permissions";
 import { Alert, Card, PageHeader, Spinner, StatusBadge } from "@/components/ui";
-import { EmptyRow, PermissionList, Section, Tags } from "@/components/dashboard";
+import { PermissionList, QueryEmptyRow, Section, Tags } from "@/components/dashboard";
 import {
   type AccessView,
   type Grant,
@@ -28,7 +28,7 @@ export default function AccessPage() {
       <PageHeader
         title="Roles y acceso"
         description="Matriz de roles, catálogo de permisos y acceso efectivo de cada identidad."
-        actions={<StatusBadge status="neutral" label={`${access.data?.length ?? 0} identidades`} />}
+        actions={<StatusBadge status="neutral" label={access.loading ? "Cargando…" : `${access.data?.length ?? 0} identidades`} />}
       />
 
       {error ? <Alert>{error.message}</Alert> : null}
@@ -59,7 +59,7 @@ export default function AccessPage() {
                       </tr>
                     ))
                   ) : (
-                    <EmptyRow colSpan={2}>Sin roles disponibles.</EmptyRow>
+                    <QueryEmptyRow colSpan={2} query={roles} empty="Sin roles disponibles." />
                   )}
                 </tbody>
               </table>
@@ -103,7 +103,7 @@ export default function AccessPage() {
                         </tr>
                       ))
                     ) : (
-                      <EmptyRow colSpan={4}>Sin identidades registradas.</EmptyRow>
+                      <QueryEmptyRow colSpan={4} query={access} empty="Sin identidades registradas." />
                     )}
                   </tbody>
                 </table>

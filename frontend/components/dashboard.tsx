@@ -56,10 +56,27 @@ export function EmptyRow({ colSpan, children }: { colSpan: number; children: Rea
   return (
     <tr>
       <td colSpan={colSpan} className={styles.muted}>
-        {children}
+        <span className={styles.emptyText}>{children}</span>
       </td>
     </tr>
   );
+}
+
+/** Fila de tabla sin datos: distingue carga, error y lista vacía. */
+export function QueryEmptyRow({
+  colSpan,
+  query,
+  empty,
+}: {
+  colSpan: number;
+  query: { loading: boolean; error: unknown };
+  empty: ReactNode;
+}) {
+  if (query.loading) return <EmptyRow colSpan={colSpan}>Cargando…</EmptyRow>;
+  if (query.error) {
+    return <EmptyRow colSpan={colSpan}>No se pudo cargar esta lista. Revise el aviso superior.</EmptyRow>;
+  }
+  return <EmptyRow colSpan={colSpan}>{empty}</EmptyRow>;
 }
 
 export function PermissionList({ names }: { names: string[] }) {

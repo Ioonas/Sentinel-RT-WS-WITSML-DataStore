@@ -168,6 +168,15 @@
   color: var(--color-text-muted);
 }
 
+/* Texto de una fila vacía: queda visible aunque la tabla sea más ancha que el móvil. */
+.emptyText {
+  position: sticky;
+  left: 0;
+  display: inline-block;
+  max-width: min(100%, 60vw);
+  white-space: normal;
+}
+
 .faint {
   color: var(--color-text-faint);
   font-size: 0.82rem;
@@ -298,7 +307,7 @@
 
 @media (max-width: 1050px) {
   .split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

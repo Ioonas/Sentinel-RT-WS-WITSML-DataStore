@@ -12,7 +12,7 @@ import {
   Spinner,
   StatusBadge,
 } from "@/components/ui";
-import { EmptyRow, Section } from "@/components/dashboard";
+import { QueryEmptyRow, Section } from "@/components/dashboard";
 import { type AuditPage } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
@@ -267,9 +267,11 @@ export default function AuditPage() {
                       );
                     })
                   ) : (
-                    <EmptyRow colSpan={8}>
-                      {path ? "Sin eventos para los filtros indicados." : "Ejecute una búsqueda para consultar la auditoría."}
-                    </EmptyRow>
+                    <QueryEmptyRow
+                      colSpan={8}
+                      query={events}
+                      empty={path ? "Sin eventos para los filtros indicados." : "Ejecute una búsqueda para consultar la auditoría."}
+                    />
                   )}
                 </tbody>
               </table>

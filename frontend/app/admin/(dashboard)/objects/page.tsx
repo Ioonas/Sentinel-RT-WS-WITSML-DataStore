@@ -12,7 +12,7 @@ import {
   Spinner,
   StatusBadge,
 } from "@/components/ui";
-import { EmptyRow, Section, Tags } from "@/components/dashboard";
+import { QueryEmptyRow, Section, Tags } from "@/components/dashboard";
 import { ActionMenu } from "@/components/ActionMenu";
 import { ModalDialog } from "@/components/Dialog";
 import { ApiError, api, type MessageView, type ObjectView, type SessionView } from "@/lib/api";
@@ -384,9 +384,11 @@ export default function ObjectsPage() {
                         </tr>
                       ))
                     ) : (
-                      <EmptyRow colSpan={6}>
-                        {queryPath ? "Sin resultados para los filtros indicados." : "Ejecute una búsqueda para listar objetos."}
-                      </EmptyRow>
+                      <QueryEmptyRow
+                        colSpan={6}
+                        query={results}
+                        empty={queryPath ? "Sin resultados para los filtros indicados." : "Ejecute una búsqueda para listar objetos."}
+                      />
                     )}
                   </tbody>
                 </table>

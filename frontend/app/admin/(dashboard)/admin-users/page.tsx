@@ -14,7 +14,7 @@ import {
   Spinner,
   StatusBadge,
 } from "@/components/ui";
-import { EmptyRow, PermissionChecks, Section, Tags } from "@/components/dashboard";
+import { PermissionChecks, QueryEmptyRow, Section, Tags } from "@/components/dashboard";
 import {
   ApiError,
   api,
@@ -325,7 +325,7 @@ export default function AdminUsersPage() {
       <PageHeader
         title="Usuarios administrativos"
         description="Cuentas humanas con roles fijos o permisos delegados. Las invitaciones son de un solo uso."
-        actions={<StatusBadge status="neutral" label={`${users.data?.length ?? 0} usuarios`} />}
+        actions={<StatusBadge status="neutral" label={users.loading ? "Cargando…" : `${users.data?.length ?? 0} usuarios`} />}
       />
 
       {users.error ? <Alert>{users.error.message}</Alert> : null}
@@ -396,7 +396,7 @@ export default function AdminUsersPage() {
                         </tr>
                       ))
                     ) : (
-                      <EmptyRow colSpan={6}>No hay usuarios administrativos.</EmptyRow>
+                      <QueryEmptyRow colSpan={6} query={users} empty="No hay usuarios administrativos." />
                     )}
                   </tbody>
                 </table>
@@ -561,7 +561,7 @@ export default function AdminUsersPage() {
                       );
                     })
                   ) : (
-                    <EmptyRow colSpan={6}>No hay invitaciones pendientes.</EmptyRow>
+                    <QueryEmptyRow colSpan={6} query={pendingInvitations} empty="No hay invitaciones pendientes." />
                   )}
                 </tbody>
               </table>
@@ -709,7 +709,7 @@ export default function AdminUsersPage() {
                           </tr>
                         ))
                       ) : (
-                        <EmptyRow colSpan={5}>Sin sesiones activas.</EmptyRow>
+                        <QueryEmptyRow colSpan={5} query={userSessions} empty="Sin sesiones activas." />
                       )}
                     </tbody>
                   </table>

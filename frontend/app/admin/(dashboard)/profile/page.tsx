@@ -4,7 +4,7 @@ import { permissionLabel } from "@/lib/permissions";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, PageHeader, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
-import { EmptyRow, Section, Tags } from "@/components/dashboard";
+import { QueryEmptyRow, Section, Tags } from "@/components/dashboard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ApiError, api, type Grant, type LinkedAccountView, type MessageView, type ProfileSessionView, type SessionView } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -347,7 +347,7 @@ export default function ProfilePage() {
                         </tr>
                       ))
                     ) : (
-                      <EmptyRow colSpan={5}>No hay sesiones activas.</EmptyRow>
+                      <QueryEmptyRow colSpan={5} query={sessions} empty="No hay sesiones activas." />
                     )}
                   </tbody>
                 </table>

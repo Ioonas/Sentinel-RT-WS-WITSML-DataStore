@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, Input, PageHeader, Select, Spinner, StatusBadge, PasswordInput } from "@/components/ui";
-import { EmptyRow, GrantEditor, Section, Tags } from "@/components/dashboard";
+import { GrantEditor, QueryEmptyRow, Section, Tags } from "@/components/dashboard";
 import { ActionMenu } from "@/components/ActionMenu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ModalDialog } from "@/components/Dialog";
@@ -75,6 +75,7 @@ export default function ServiceAccountsPage() {
   const [webMessage, setWebMessage] = useState<string | null>(null);
   const [webRemoving, setWebRemoving] = useState<WebAccessUserView | null>(null);
   const [webInvitations, setWebInvitations] = useState<WebAccessInvitationView[]>([]);
+  const [webLoading, setWebLoading] = useState(false);
   const [webCancelling, setWebCancelling] = useState<WebAccessInvitationView | null>(null);
   const [rotateCredential, setRotateCredential] = useState("");
   const [rotateConfirm, setRotateConfirm] = useState("");
@@ -279,12 +280,15 @@ export default function ServiceAccountsPage() {
   }
 
   async function loadWebAccess(account: ServiceAccountView) {
+    setWebLoading(true);
     try {
       const result = await api<WebAccessListView>(`/service-accounts/${account.id}/web-access`);
       setWebUsers(result.users);
       setWebInvitations(result.invitations);
     } catch (caught) {
       setWebError(caught instanceof ApiError ? caught.message : "No se pudieron cargar las personas con acceso.");
+    } finally {
+      setWebLoading(false);
     }
   }
 
@@ -401,7 +405,9 @@ export default function ServiceAccountsPage() {
             {webMessage ? <Alert tone="ok">{webMessage}</Alert> : null}
             <div className={styles.stack}>
               <span className={styles.groupLabel}>Invitaciones pendientes</span>
-              {webInvitations.length > 0 ? (
+              {webLoading ? (
+                <p className={styles.faint}>Cargando…</p>
+              ) : webInvitations.length > 0 ? (
                 <div className={styles.tableWrap}>
                   <table className={styles.table}>
                     <tbody>
@@ -434,7 +440,9 @@ export default function ServiceAccountsPage() {
                 <p className={styles.faint}>No hay invitaciones pendientes.</p>
               )}
               <span className={styles.groupLabel}>Personas con acceso</span>
-              {webUsers.length > 0 ? (
+              {webLoading ? (
+                <p className={styles.faint}>Cargando…</p>
+              ) : webUsers.length > 0 ? (
                 <div className={styles.tableWrap}>
                   <table className={styles.table}>
                     <tbody>
@@ -620,7 +628,7 @@ export default function ServiceAccountsPage() {
       <PageHeader
         title="Cuentas de servicio"
         description="Identidades WMLS con permisos por objeto y alcance opcional por pozo. Las credenciales se muestran una sola vez."
-        actions={<StatusBadge status="neutral" label={`${data?.length ?? 0} cuentas`} />}
+        actions={<StatusBadge status="neutral" label={loading ? "Cargando…" : `${data?.length ?? 0} cuentas`} />}
       />
 
       {error ? <Alert>{error.message}</Alert> : null}
@@ -757,7 +765,7 @@ export default function ServiceAccountsPage() {
                         </tr>
                       ))
                     ) : (
-                      <EmptyRow colSpan={7}>Aún no hay cuentas de servicio.</EmptyRow>
+                      <QueryEmptyRow colSpan={7} query={{ loading, error }} empty="Aún no hay cuentas de servicio. Cree la primera en el formulario Nueva cuenta." />
                     )}
                   </tbody>
                 </table>
