@@ -1,0 +1,23 @@
+# Dependencias de ejecución de Sentinel RT&WS WITSML DataStore 1.0.3.
+# Requiere Python 3.14. Versiones probadas en el entorno de desarrollo.
+# Para instalar: python -m pip install -r requirements.txt
+# Las dependencias de pruebas (pytest, pytest-asyncio, httpx, ruff) van en el extra "dev" de pyproject.toml.
+
+fastapi==0.165.0
+starlette==1.10.0
+pydantic==2.14.4
+pydantic-settings==2.16.3
+sqlalchemy==2.1.9
+asyncpg==0.32.0
+alembic==1.20.1
+lxml==6.1.3
+argon2-cffi==25.1.0
+
+# Servidor ASGI (uvicorn[standard])
+uvicorn==0.54.0
+httptools==0.9.0
+uvloop==0.23.0
+watchfiles==1.3.0
+websockets==17.4
+python-dotenv==1.2.4
+PyYAML==6.0.4
