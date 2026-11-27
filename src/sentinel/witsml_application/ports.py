@@ -207,25 +207,17 @@ def object_key(
     return (object_type, uid, uid_well or "", uid_wellbore or "")
 
 
-class ObjectOwnerPort(Protocol):
-    """Creador de cada objeto WITSML. ``owner_id`` nulo significa creado por un administrador."""
+class ObjectAssignmentPort(Protocol):
+    """Cambia la cuenta dueña de un objeto y de sus descendientes. Devuelve cuántos cambiaron."""
 
-    async def record(
+    async def assign(
         self,
         object_type: str,
         uid: str,
-        uid_well: str,
-        uid_wellbore: str,
+        uid_well: str | None,
+        uid_wellbore: str | None,
         owner_id: str | None,
-    ) -> None: ...
-
-    async def owner_of(
-        self, object_type: str, uid: str, uid_well: str, uid_wellbore: str
-    ) -> str | None: ...
-
-    async def owned_keys(
-        self, owner_id: str
-    ) -> frozenset[tuple[str, str, str, str]]: ...
+    ) -> int: ...
 
 
 class ChangeLogRepositoryPort(Protocol):

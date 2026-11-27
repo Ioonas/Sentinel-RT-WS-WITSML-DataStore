@@ -4,19 +4,24 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from tests.owners import create_owner_account
+
 
 async def test_borrado_con_dependientes_lista_todos_los_bloqueos(
     admin_client: AsyncClient, csrf: str
 ) -> None:
     headers = {"x-csrf-token": csrf}
+    owner = await create_owner_account(admin_client, csrf, "dueno.dependencias")
     well = await admin_client.post(
-        "/admin-api/v1/objects/well", headers=headers, json={"uid": "dep-well", "name": "Pozo"}
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"uid": "dep-well", "name": "Pozo", "owner_id": owner},
     )
     assert well.status_code == 201, well.text
     wellbore = await admin_client.post(
         "/admin-api/v1/objects/wellbore",
         headers=headers,
-        json={"uid": "dep-wb", "uid_well": "dep-well", "name": "Sondeo"},
+        json={"uid": "dep-wb", "uid_well": "dep-well", "name": "Sondeo", "owner_id": owner},
     )
     assert wellbore.status_code == 201, wellbore.text
 
@@ -41,8 +46,11 @@ async def test_borrado_sin_dependientes_funciona(
     admin_client: AsyncClient, csrf: str
 ) -> None:
     headers = {"x-csrf-token": csrf}
+    owner = await create_owner_account(admin_client, csrf, "dueno.solo")
     well = await admin_client.post(
-        "/admin-api/v1/objects/well", headers=headers, json={"uid": "solo-well", "name": "Pozo"}
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"uid": "solo-well", "name": "Pozo", "owner_id": owner},
     )
     assert well.status_code == 201, well.text
 

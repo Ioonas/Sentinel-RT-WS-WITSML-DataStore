@@ -84,6 +84,8 @@ async def wmls_endpoint(request: Request) -> Response:
                 return _unauthorized(
                     request, "Credenciales inválidas o cuenta deshabilitada."
                 )
+            # Cada cuenta de servicio solo lee y escribe sus propios objetos.
+            services.repos.bind_owner(principal.owner_id)
             fields = await execute(
                 services.witsml,
                 principal,

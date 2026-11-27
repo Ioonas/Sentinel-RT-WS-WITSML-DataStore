@@ -37,7 +37,10 @@ class WitsmlObjectMixin:
     uid_well: Mapped[str | None] = mapped_column(String(128))
     uid_wellbore: Mapped[str | None] = mapped_column(String(128))
     name: Mapped[str | None] = mapped_column(String(255))
-    identity_key: Mapped[str] = mapped_column(String(640), nullable=False, unique=True)
+    # Cuenta de servicio dueña del objeto. NULL = sin asignar: ninguna cuenta lo ve por WMLS.
+    owner_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    # Incluye al dueño: dos cuentas pueden tener objetos con el mismo uid.
+    identity_key: Mapped[str] = mapped_column(String(720), nullable=False, unique=True)
     xml: Mapped[str] = mapped_column(Text, nullable=False)
     fields: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     d_tim_creation: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -169,7 +172,9 @@ class ChangeLogRow(Base):
     start_index: Mapped[str | None] = mapped_column(String(64))
     end_index: Mapped[str | None] = mapped_column(String(64))
     correlation_id: Mapped[str | None] = mapped_column(String(64))
+    owner_id: Mapped[str | None] = mapped_column(String(64))
     __table_args__ = (
+        Index("ix_change_log_owner", "owner_id"),
         Index("ix_change_log_object", "object_type", "uid"),
         Index("ix_change_log_date", "change_date"),
     )

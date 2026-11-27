@@ -19,6 +19,7 @@ from sentinel.admin_api.schemas import (
     MessageView,
     ObjectCreateRequest,
     ObjectDeleteRequest,
+    ObjectOwnerRequest,
     ObjectView,
 )
 from sentinel.bootstrap.container import RequestServices
@@ -31,6 +32,15 @@ from sentinel.witsml_application.inventory import ObjectSummary
 router = APIRouter(tags=["Operación"])
 
 
+def _bind_objects(services: RequestServices, auth: AuthContext) -> None:
+    """Lectura y borrado de objetos acotados a la cuenta dueña de la identidad.
+
+    El lector vinculado solo ve lo de su cuenta de servicio. El superadministrador y
+    los demás administradores no tienen cuenta dueña y ven todos los objetos.
+    """
+    services.repos.bind_owner(auth.principal.owner_id)
+
+
 def _object_view(item: ObjectSummary) -> ObjectView:
     return ObjectView(
         object_type=item.object_type,
@@ -41,6 +51,7 @@ def _object_view(item: ObjectSummary) -> ObjectView:
         created_at=item.created_at,
         changed_at=item.changed_at,
         growing=item.growing,
+        owner_id=item.owner_id,
     )
 
 
@@ -54,6 +65,7 @@ async def search_objects(
     name: str | None = None,
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> list[ObjectView]:
+    _bind_objects(services, auth)
     items = await services.inventory.search(
         object_type,
         uid_well=uid_well,
@@ -74,6 +86,9 @@ async def _create_object(
     object_type: str,
     payload: ObjectCreateRequest,
 ) -> ObjectView:
+    # Valida que la cuenta exista; luego el alta y las lecturas quedan acotadas a ella.
+    await services.identities.get_service_account(payload.owner_id)
+    services.repos.bind_owner(payload.owner_id)
     try:
         uid = await services.witsml.create_object_as_admin(
             object_type, uid=payload.uid, uid_well=payload.uid_well, name=payload.name
@@ -89,10 +104,44 @@ async def _create_object(
         correlation=correlation_id(request),
         object_type=object_type,
         object_uid=uid,
-        details={"uid_well": payload.uid_well, "name": payload.name},
+        details={"uid_well": payload.uid_well, "name": payload.name, "owner_id": payload.owner_id},
     )
     item = await services.inventory.get(
         object_type, uid, uid_well=payload.uid_well, uid_wellbore=None
+    )
+    return _object_view(item)
+
+
+@router.post("/objects/{object_type}/owner", response_model=ObjectView)
+async def assign_object_owner(
+    object_type: str,
+    payload: ObjectOwnerRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_recent_auth),
+    _: AuthContext = Depends(require_permission(AdminPermission.OBJECTS_WRITE)),
+    __: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ObjectView:
+    """Asigna un objeto y sus descendientes a otra cuenta de servicio."""
+    await services.identities.get_service_account(payload.owner_id)
+    moved = await services.inventory.assign_owner(
+        object_type,
+        payload.uid,
+        uid_well=payload.uid_well,
+        uid_wellbore=payload.uid_wellbore,
+        owner_id=payload.owner_id,
+    )
+    await audit(
+        services,
+        auth,
+        action="object.owner_changed",
+        correlation=correlation_id(request),
+        object_type=object_type,
+        object_uid=payload.uid,
+        details={"owner_id": payload.owner_id, "moved": moved},
+    )
+    item = await services.inventory.get(
+        object_type, payload.uid, uid_well=payload.uid_well, uid_wellbore=payload.uid_wellbore
     )
     return _object_view(item)
 
@@ -138,6 +187,7 @@ async def get_object(
     uid_well: str | None = None,
     uid_wellbore: str | None = None,
 ) -> ObjectView:
+    _bind_objects(services, auth)
     item = await services.inventory.get(
         object_type,
         uid,
@@ -157,6 +207,7 @@ async def get_object_dependencies(
     uid_well: str | None = None,
     uid_wellbore: str | None = None,
 ) -> list[str]:
+    _bind_objects(services, auth)
     return await services.inventory.dependencies(
         object_type,
         uid,
@@ -183,6 +234,7 @@ async def delete_object(
         raise ValidationError(
             "La confirmación debe coincidir exactamente con el uid del objeto."
         )
+    _bind_objects(services, auth)
     await services.inventory.delete(
         object_type,
         uid,

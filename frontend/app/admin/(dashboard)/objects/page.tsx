@@ -15,7 +15,14 @@ import {
 import { QueryEmptyRow, Section, Tags } from "@/components/dashboard";
 import { ActionMenu } from "@/components/ActionMenu";
 import { ModalDialog } from "@/components/Dialog";
-import { ApiError, api, type MessageView, type ObjectView, type SessionView } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type MessageView,
+  type ObjectView,
+  type ServiceAccountView,
+  type SessionView,
+} from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import { useApiQuery } from "@/lib/hooks";
@@ -59,6 +66,9 @@ export default function ObjectsPage() {
   const profile = useApiQuery<SessionView>("/profile");
   const canCreate = can(profile.data, "admin.objects.write");
   const canDelete = can(profile.data, "admin.objects.delete");
+  const canAssign = canCreate;
+  const accounts = useApiQuery<ServiceAccountView[]>(canCreate ? "/service-accounts" : null);
+  const accountName = new Map((accounts.data ?? []).map((account) => [account.id, account.name]));
   const wellOptions = useApiQuery<ObjectView[]>(
     canCreate ? "/objects?objectType=well&limit=1000" : null,
   );
@@ -66,6 +76,11 @@ export default function ObjectsPage() {
   const [createUid, setCreateUid] = useState("");
   const [createName, setCreateName] = useState("");
   const [createParent, setCreateParent] = useState("");
+  const [createOwner, setCreateOwner] = useState("");
+  const [assignTarget, setAssignTarget] = useState<ObjectView | null>(null);
+  const [assignOwner, setAssignOwner] = useState("");
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -150,6 +165,7 @@ export default function ObjectsPage() {
             uid: createUid.trim() || null,
             name: createName.trim(),
             uid_well: createType === "wellbore" ? createParent : null,
+            owner_id: createOwner,
           }),
         }),
       );
@@ -164,6 +180,43 @@ export default function ObjectsPage() {
       setCreateError(caught instanceof ApiError ? caught.message : "No se pudo crear el objeto.");
     } finally {
       setCreateBusy(false);
+    }
+  }
+
+  function startAssign(item: ObjectView) {
+    setAssignTarget(item);
+    setAssignOwner(item.owner_id ?? "");
+    setAssignError(null);
+    setActionError(null);
+    setMessage(null);
+  }
+
+  async function assign(event: FormEvent) {
+    event.preventDefault();
+    if (!assignTarget || !assignOwner) return;
+    setAssignBusy(true);
+    setAssignError(null);
+    try {
+      const updated = await runWithReauth(() =>
+        api<ObjectView>(`/objects/${assignTarget.object_type}/owner`, {
+          method: "POST",
+          body: JSON.stringify({
+            uid: assignTarget.uid,
+            uid_well: assignTarget.uid_well,
+            uid_wellbore: assignTarget.uid_wellbore,
+            owner_id: assignOwner,
+          }),
+        }),
+      );
+      setMessage(
+        `Objeto ${updated.uid} asignado a ${accountName.get(assignOwner) ?? "la cuenta indicada"}. Los pozos laterales y registros de ese pozo se movieron con él.`,
+      );
+      setAssignTarget(null);
+      results.reload();
+    } catch (caught) {
+      setAssignError(caught instanceof ApiError ? caught.message : "No se pudo asignar el objeto.");
+    } finally {
+      setAssignBusy(false);
     }
   }
 
@@ -204,7 +257,7 @@ export default function ObjectsPage() {
 
       {profile.data?.linked_service_account ? (
         <Alert tone="ok">
-          Viendo datos de la cuenta de servicio <strong>{profile.data.linked_service_account}</strong>. Solo lectura, y solo los pozos que esa cuenta crea.
+          Viendo datos de la cuenta de servicio <strong>{profile.data.linked_service_account}</strong>. Solo lectura, y solo los objetos de esa cuenta.
         </Alert>
       ) : null}
       {message ? <Alert tone="ok">{message}</Alert> : null}
@@ -276,15 +329,33 @@ export default function ObjectsPage() {
                     <option value="wellbore">Pozo lateral (wellbore)</option>
                   </Select>
                 </Field>
+                <Field label="Cuenta dueña" htmlFor="create-owner" hint="Cuenta de servicio que verá y modificará el objeto.">
+                  <Select
+                    id="create-owner"
+                    required
+                    value={createOwner}
+                    onChange={(event) => {
+                      setCreateOwner(event.target.value);
+                      setCreateParent("");
+                    }}
+                  >
+                    <option value="">Seleccione una cuenta…</option>
+                    {(accounts.data ?? []).map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
                 {createType === "wellbore" ? (
-                  <Field label="Pozo padre" htmlFor="create-parent" hint="Pozo al que pertenece el pozo lateral.">
+                  <Field label="Pozo padre" htmlFor="create-parent" hint="Pozo de la cuenta dueña al que pertenece el pozo lateral.">
                     <Select
                       id="create-parent"
                       value={createParent}
                       onChange={(event) => setCreateParent(event.target.value)}
                     >
                       <option value="">Seleccione un pozo…</option>
-                      {(wellOptions.data ?? []).map((well) => (
+                      {(wellOptions.data ?? []).filter((well) => well.owner_id === createOwner).map((well) => (
                         <option key={well.uid} value={well.uid}>
                           {well.name ?? well.uid}
                         </option>
@@ -314,7 +385,7 @@ export default function ObjectsPage() {
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={createBusy || (createType === "wellbore" && !createParent)}
+                  disabled={createBusy || !createOwner || (createType === "wellbore" && !createParent)}
                 >
                   {createBusy ? "Creando…" : "Crear"}
                 </Button>
@@ -340,6 +411,7 @@ export default function ObjectsPage() {
                       <th>uid</th>
                       <th>Nombre</th>
                       <th>Jerarquía</th>
+                      <th>Cuenta dueña</th>
                       <th>Cambiado</th>
                       <th>Estado</th>
                       <th>Acciones</th>
@@ -356,6 +428,13 @@ export default function ObjectsPage() {
                           <td className={styles.faint}>
                             {item.uid_well ? `pozo ${item.uid_well}` : "—"}
                             {item.uid_wellbore ? ` · sondeo ${item.uid_wellbore}` : ""}
+                          </td>
+                          <td>
+                            {item.owner_id ? (
+                              accountName.get(item.owner_id) ?? item.owner_id
+                            ) : (
+                              <StatusBadge status="warn" label="Sin asignar" />
+                            )}
                           </td>
                           <td className={styles.faint}>{formatDateTime(item.changed_at)}</td>
                           <td>
@@ -374,6 +453,9 @@ export default function ObjectsPage() {
                                 subject={item.name || item.uid}
                                 items={[
                                   { label: "Ver dependencias", onSelect: () => loadDependencies(item) },
+                                  ...(canAssign
+                                    ? [{ label: "Asignar cuenta dueña", onSelect: () => startAssign(item) }]
+                                    : []),
                                   ...(canDelete
                                     ? [{ label: "Eliminar objeto", danger: true, onSelect: () => startDelete(item) }]
                                     : []),
@@ -385,7 +467,7 @@ export default function ObjectsPage() {
                       ))
                     ) : (
                       <QueryEmptyRow
-                        colSpan={6}
+                        colSpan={7}
                         query={results}
                         empty={queryPath ? "Sin resultados para los filtros indicados." : "Ejecute una búsqueda para listar objetos."}
                       />
@@ -411,6 +493,8 @@ export default function ObjectsPage() {
                 <dd className={styles.wrap}>{detail.uid_well || "—"}</dd>
                 <dt>uidWellbore</dt>
                 <dd className={styles.wrap}>{detail.uid_wellbore || "—"}</dd>
+                <dt>Cuenta dueña</dt>
+                <dd>{detail.owner_id ? accountName.get(detail.owner_id) ?? detail.owner_id : "Sin asignar"}</dd>
                 <dt>Creado</dt>
                 <dd>{formatDateTime(detail.created_at)}</dd>
                 <dt>Cambiado</dt>
@@ -428,6 +512,50 @@ export default function ObjectsPage() {
           </Section>
         </Card>
       </div>
+
+      {assignTarget ? (
+        <ModalDialog
+          titleId="assign-object-title"
+          descriptionId="assign-object-description"
+          role="dialog"
+          busy={assignBusy}
+          onClose={() => setAssignTarget(null)}
+        >
+          <h2 id="assign-object-title" className={dialogStyles.title}>
+            Asignar {assignTarget.uid} a una cuenta
+          </h2>
+          <p id="assign-object-description" className={dialogStyles.text}>
+            El objeto y sus pozos laterales, registros y trayectorias se mueven a la cuenta elegida. Si esa cuenta ya tiene un objeto con el mismo uid, la operación se rechaza.
+          </p>
+          <form className={dialogStyles.form} onSubmit={assign}>
+            <Field label="Cuenta dueña" htmlFor="assign-owner">
+              <Select
+                id="assign-owner"
+                data-initial-focus
+                required
+                value={assignOwner}
+                onChange={(event) => setAssignOwner(event.target.value)}
+              >
+                <option value="">Seleccione una cuenta…</option>
+                {(accounts.data ?? []).map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {assignError ? <Alert>{assignError}</Alert> : null}
+            <div className={dialogStyles.actions}>
+              <Button variant="ghost" onClick={() => setAssignTarget(null)} disabled={assignBusy}>
+                Cancelar
+              </Button>
+              <Button type="submit" variant="primary" disabled={assignBusy || !assignOwner}>
+                {assignBusy ? "Asignando…" : "Asignar"}
+              </Button>
+            </div>
+          </form>
+        </ModalDialog>
+      ) : null}
 
       {deleteTarget ? (
         <ModalDialog

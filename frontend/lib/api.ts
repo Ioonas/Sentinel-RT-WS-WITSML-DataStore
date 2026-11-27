@@ -198,6 +198,8 @@ export type ObjectView = {
   created_at: string;
   changed_at: string;
   growing: boolean;
+  /** Cuenta de servicio dueña; null = sin asignar (ninguna cuenta lo ve por WMLS). */
+  owner_id: string | null;
 };
 
 export type AuditEventView = {

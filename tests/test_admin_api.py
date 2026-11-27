@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from tests.conftest import ADMIN_PASSWORD, CONTACT
+from tests.owners import create_owner_account
 
 pytestmark = pytest.mark.integration
 
@@ -335,9 +336,12 @@ async def test_admin_creates_well_and_wellbore_with_validation(
     admin_client: AsyncClient, csrf: str
 ) -> None:
     headers = {"x-csrf-token": csrf}
+    owner = await create_owner_account(admin_client, csrf, "dueno.panel")
 
     generated = await admin_client.post(
-        "/admin-api/v1/objects/well", headers=headers, json={"name": "Pozo generado"}
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"name": "Pozo generado", "owner_id": owner},
     )
     assert generated.status_code == 201, generated.text
     assert generated.json()["uid"]
@@ -345,7 +349,7 @@ async def test_admin_creates_well_and_wellbore_with_validation(
     well = await admin_client.post(
         "/admin-api/v1/objects/well",
         headers=headers,
-        json={"uid": "adm-well-1", "name": "Pozo A & <B>"},
+        json={"uid": "adm-well-1", "name": "Pozo A & <B>", "owner_id": owner},
     )
     assert well.status_code == 201, well.text
     assert well.json()["uid"] == "adm-well-1"
@@ -354,14 +358,14 @@ async def test_admin_creates_well_and_wellbore_with_validation(
     duplicate = await admin_client.post(
         "/admin-api/v1/objects/well",
         headers=headers,
-        json={"uid": "adm-well-1", "name": "Otro"},
+        json={"uid": "adm-well-1", "name": "Otro", "owner_id": owner},
     )
     assert duplicate.status_code == 409, duplicate.text
 
     wellbore = await admin_client.post(
         "/admin-api/v1/objects/wellbore",
         headers=headers,
-        json={"uid": "adm-wb-1", "uid_well": "adm-well-1", "name": "Sondeo 1"},
+        json={"uid": "adm-wb-1", "uid_well": "adm-well-1", "name": "Sondeo 1", "owner_id": owner},
     )
     assert wellbore.status_code == 201, wellbore.text
     assert wellbore.json()["uid_well"] == "adm-well-1"
@@ -369,19 +373,28 @@ async def test_admin_creates_well_and_wellbore_with_validation(
     orphan = await admin_client.post(
         "/admin-api/v1/objects/wellbore",
         headers=headers,
-        json={"uid_well": "no-existe", "name": "Huérfano"},
+        json={"uid_well": "no-existe", "name": "Huérfano", "owner_id": owner},
     )
     assert orphan.status_code == 422, orphan.text
 
     no_parent = await admin_client.post(
-        "/admin-api/v1/objects/wellbore", headers=headers, json={"name": "Sin padre"}
+        "/admin-api/v1/objects/wellbore",
+        headers=headers,
+        json={"name": "Sin padre", "owner_id": owner},
     )
     assert no_parent.status_code == 422, no_parent.text
+
+    no_owner = await admin_client.post(
+        "/admin-api/v1/objects/well",
+        headers=headers,
+        json={"uid": "sin-dueno", "name": "Sin dueno"},
+    )
+    assert no_owner.status_code == 422, no_owner.text
 
     well_with_parent = await admin_client.post(
         "/admin-api/v1/objects/well",
         headers=headers,
-        json={"uid_well": "adm-well-1", "name": "Mezcla"},
+        json={"uid_well": "adm-well-1", "name": "Mezcla", "owner_id": owner},
     )
     assert well_with_parent.status_code == 422, well_with_parent.text
 

@@ -24,6 +24,8 @@ class StoredObject:
     changed_at: datetime
     growing_until: datetime | None = None
     db_id: int | None = None
+    # Cuenta de servicio dueña; None = sin asignar.
+    owner_id: str | None = None
 
     @property
     def growing(self) -> bool:
@@ -131,3 +133,5 @@ class ChangeLogRecord:
     mnemonics: str | None = None
     start_index: str | None = None
     end_index: str | None = None
+    #: Cuenta dueña del objeto afectado; None = el registro sigue la cuenta ligada.
+    owner_id: str | None = None

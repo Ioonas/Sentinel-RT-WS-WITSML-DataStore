@@ -273,12 +273,22 @@ class ObjectView(BaseModel):
     created_at: datetime
     changed_at: datetime
     growing: bool
+    owner_id: str | None = None
 
 
 class ObjectCreateRequest(StrictModel):
     uid: str | None = Field(default=None, min_length=1, max_length=64)
     uid_well: str | None = Field(default=None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=64)
+    # Cuenta de servicio que será dueña del objeto creado.
+    owner_id: str = Field(min_length=1, max_length=64)
+
+
+class ObjectOwnerRequest(StrictModel):
+    uid: str = Field(min_length=1, max_length=64)
+    uid_well: str | None = Field(default=None, min_length=1, max_length=64)
+    uid_wellbore: str | None = Field(default=None, min_length=1, max_length=64)
+    owner_id: str = Field(min_length=1, max_length=64)
 
 
 class ObjectDeleteRequest(StrictModel):

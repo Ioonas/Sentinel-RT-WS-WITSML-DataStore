@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,6 +25,7 @@ from sentinel.identity_access.ports import (
     ServiceAccountRecord,
     SessionRecord,
 )
+from sentinel.persistence.scoping import OBJECT_TYPES, OWNER_SCOPE_KEY, identity_key
 from sentinel.persistence.tables import (
     AdminSessionRow,
     AdminUserRow,
@@ -36,7 +37,6 @@ from sentinel.persistence.tables import (
     LogSampleRow,
     MailOutboxRow,
     MudLogRow,
-    ObjectOwnerRow,
     PasswordResetRow,
     ServerConfigRow,
     ServiceAccountRow,
@@ -45,6 +45,7 @@ from sentinel.persistence.tables import (
     WellboreRow,
     WellRow,
 )
+from sentinel.shared.errors import ConflictError
 from sentinel.witsml_application.domain.models import (
     ChangeLogRecord,
     LogCurve,
@@ -57,15 +58,6 @@ from sentinel.witsml_application.domain.models import (
     WellRecord,
 )
 from sentinel.witsml_application.ports import ListFilter
-
-
-def identity_key(
-    object_type: str,
-    uid: str,
-    uid_well: str | None = None,
-    uid_wellbore: str | None = None,
-) -> str:
-    return f"{object_type}|{uid_well or ''}|{uid_wellbore or ''}|{uid}"
 
 
 def _apply_common(row: Any, record: Any) -> None:
@@ -92,6 +84,7 @@ def _to_well(row: WellRow) -> WellRecord:
         changed_at=row.d_tim_last_change,
         growing_until=row.growing_until,
         db_id=row.id,
+        owner_id=row.owner_id,
     )
 
 
@@ -107,6 +100,7 @@ def _to_wellbore(row: WellboreRow) -> WellboreRecord:
         changed_at=row.d_tim_last_change,
         growing_until=row.growing_until,
         db_id=row.id,
+        owner_id=row.owner_id,
     )
 
 
@@ -122,6 +116,7 @@ def _to_log(row: LogRow) -> LogRecord:
         changed_at=row.d_tim_last_change,
         growing_until=row.growing_until,
         db_id=row.id,
+        owner_id=row.owner_id,
         index_type=row.index_type,
         index_curve=row.index_curve,
         direction=row.direction,
@@ -157,6 +152,7 @@ def _to_trajectory(row: TrajectoryRow) -> TrajectoryRecord:
         changed_at=row.d_tim_last_change,
         growing_until=row.growing_until,
         db_id=row.id,
+        owner_id=row.owner_id,
         md_min=row.md_min,
         md_max=row.md_max,
         md_uom=row.md_uom,
@@ -175,6 +171,7 @@ def _to_mudlog(row: MudLogRow) -> MudLogRecord:
         changed_at=row.d_tim_last_change,
         growing_until=row.growing_until,
         db_id=row.id,
+        owner_id=row.owner_id,
         md_min=row.md_min,
         md_max=row.md_max,
         md_uom=row.md_uom,
@@ -238,7 +235,7 @@ class SqlAlchemyWellRepository:
         return [_to_well(row) for row in rows]
 
     async def add(self, record: WellRecord) -> None:
-        row = WellRow(identity_key=identity_key("well", record.uid, record.uid, None))
+        row = WellRow()
         _apply_common(row, record)
         self._session.add(row)
         await self._session.flush()
@@ -287,11 +284,7 @@ class SqlAlchemyWellboreRepository:
         return [_to_wellbore(row) for row in rows]
 
     async def add(self, record: WellboreRecord) -> None:
-        row = WellboreRow(
-            identity_key=identity_key(
-                "wellbore", record.uid, record.uid_well, record.uid_wellbore
-            )
-        )
+        row = WellboreRow()
         _apply_common(row, record)
         self._session.add(row)
         await self._session.flush()
@@ -361,9 +354,6 @@ class SqlAlchemyLogRepository:
 
     async def add(self, record: LogRecord) -> None:
         row = LogRow(
-            identity_key=identity_key(
-                "log", record.uid, record.uid_well, record.uid_wellbore
-            ),
             index_type=record.index_type,
             index_curve=record.index_curve,
             direction=record.direction,
@@ -669,9 +659,6 @@ class SqlAlchemyTrajectoryRepository:
 
     async def add(self, record: TrajectoryRecord) -> None:
         row = TrajectoryRow(
-            identity_key=identity_key(
-                "trajectory", record.uid, record.uid_well, record.uid_wellbore
-            ),
             md_min=record.md_min,
             md_max=record.md_max,
             md_uom=record.md_uom,
@@ -813,9 +800,6 @@ class SqlAlchemyMudLogRepository:
 
     async def add(self, record: MudLogRecord) -> None:
         row = MudLogRow(
-            identity_key=identity_key(
-                "mudLog", record.uid, record.uid_well, record.uid_wellbore
-            ),
             md_min=record.md_min,
             md_max=record.md_max,
             md_uom=record.md_uom,
@@ -867,6 +851,7 @@ class SqlAlchemyChangeLogRepository:
                 mnemonics=record.mnemonics,
                 start_index=record.start_index,
                 end_index=record.end_index,
+                owner_id=record.owner_id,
             )
         )
         await self._session.flush()
@@ -1561,69 +1546,86 @@ class SqlAlchemyMailOutbox:
         )
 
 
-class SqlAlchemyObjectOwnerRepository:
+class SqlAlchemyObjectAssignments:
+    """Asigna un objeto y sus descendientes a otra cuenta de servicio (panel, sin alcance)."""
+
+    _MODELS: dict[str, type] = {
+        "well": WellRow,
+        "wellbore": WellboreRow,
+        "log": LogRow,
+        "mudLog": MudLogRow,
+        "trajectory": TrajectoryRow,
+    }
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    @staticmethod
-    def _key_clause(object_type: str, uid: str, uid_well: str, uid_wellbore: str) -> Any:
-        return and_(
-            ObjectOwnerRow.object_type == object_type,
-            ObjectOwnerRow.uid == uid,
-            ObjectOwnerRow.uid_well == uid_well,
-            ObjectOwnerRow.uid_wellbore == uid_wellbore,
-        )
-
-    async def record(
+    async def assign(
         self,
         object_type: str,
         uid: str,
-        uid_well: str,
-        uid_wellbore: str,
+        uid_well: str | None,
+        uid_wellbore: str | None,
         owner_id: str | None,
-    ) -> None:
-        # Upsert: un administrador que vuelve a crear un uid borrado lo deja sin dueño.
-        row = await self._session.scalar(
-            select(ObjectOwnerRow).where(
-                self._key_clause(object_type, uid, uid_well, uid_wellbore)
-            )
-        )
-        if row is None:
-            self._session.add(
-                ObjectOwnerRow(
-                    object_type=object_type,
-                    uid=uid,
-                    uid_well=uid_well,
-                    uid_wellbore=uid_wellbore,
-                    owner_id=owner_id,
+    ) -> int:
+        """Devuelve cuántos objetos cambiaron de dueño; 0 si no existe el objeto."""
+        model = self._MODELS[object_type]
+        stmt = select(model).where(func.lower(model.uid) == uid.lower())
+        if object_type in ("wellbore", "log", "mudLog", "trajectory") and uid_well:
+            stmt = stmt.where(func.lower(model.uid_well) == uid_well.lower())
+        if object_type in ("log", "mudLog", "trajectory") and uid_wellbore:
+            stmt = stmt.where(func.lower(model.uid_wellbore) == uid_wellbore.lower())
+        root = await self._session.scalar(stmt)
+        if root is None:
+            return 0
+
+        targets = [root]
+        if object_type == "well":
+            for child in (WellboreRow, LogRow, MudLogRow, TrajectoryRow):
+                targets += list(
+                    (
+                        await self._session.scalars(
+                            select(child).where(
+                                func.lower(child.uid_well) == root.uid.lower()
+                            )
+                        )
+                    ).all()
                 )
+        elif object_type == "wellbore":
+            for child in (LogRow, MudLogRow, TrajectoryRow):
+                targets += list(
+                    (
+                        await self._session.scalars(
+                            select(child).where(
+                                func.lower(child.uid_well) == (root.uid_well or "").lower(),
+                                func.lower(child.uid_wellbore) == root.uid.lower(),
+                            )
+                        )
+                    ).all()
+                )
+
+        for target in targets:
+            well = target.uid if isinstance(target, WellRow) else target.uid_well
+            key = identity_key(
+                owner_id,
+                OBJECT_TYPES[type(target)],
+                target.uid,
+                well,
+                target.uid_wellbore,
             )
-        else:
-            row.owner_id = owner_id
+            clash = await self._session.scalar(
+                select(type(target).id).where(type(target).identity_key == key)
+            )
+            if clash is not None:
+                raise ConflictError(
+                    f"La cuenta destino ya tiene un objeto {object_type} con uid "
+                    f"'{target.uid}'."
+                )
+
+        for target in targets:
+            target.owner_id = owner_id
         await self._session.flush()
-
-    async def owner_of(
-        self, object_type: str, uid: str, uid_well: str, uid_wellbore: str
-    ) -> str | None:
-        return await self._session.scalar(
-            select(ObjectOwnerRow.owner_id).where(
-                self._key_clause(object_type, uid, uid_well, uid_wellbore)
-            )
-        )
-
-    async def owned_keys(self, owner_id: str) -> frozenset[tuple[str, str, str, str]]:
-        # Incluye objetos ya borrados: el historial de cambios de la cuenta sigue visible.
-        rows = (
-            await self._session.execute(
-                select(
-                    ObjectOwnerRow.object_type,
-                    ObjectOwnerRow.uid,
-                    ObjectOwnerRow.uid_well,
-                    ObjectOwnerRow.uid_wellbore,
-                ).where(ObjectOwnerRow.owner_id == owner_id)
-            )
-        ).all()
-        return frozenset((r.object_type, r.uid, r.uid_well, r.uid_wellbore) for r in rows)
+        return len(targets)
 
 
 class SqlAlchemyRepositories:
@@ -1637,11 +1639,21 @@ class SqlAlchemyRepositories:
         self.mud_logs = SqlAlchemyMudLogRepository(session)
         self.trajectories = SqlAlchemyTrajectoryRepository(session)
         self.change_log = SqlAlchemyChangeLogRepository(session)
-        self.object_owners = SqlAlchemyObjectOwnerRepository(session)
         self.audit = SqlAlchemyAuditRepository(session)
         self.config = SqlAlchemyConfigRepository(session)
         self.identities = SqlAlchemyIdentityRepository(session)
         self.mail = SqlAlchemyMailOutbox(session)
+        self.assignments = SqlAlchemyObjectAssignments(session)
+
+    def bind_owner(self, owner_id: str | None) -> None:
+        """Limita todas las lecturas y escrituras de objetos a una cuenta de servicio.
+
+        Sin cuenta ligada (``None``) la sesión ve todos los objetos.
+        """
+        if owner_id is None:
+            self.session.info.pop(OWNER_SCOPE_KEY, None)
+        else:
+            self.session.info[OWNER_SCOPE_KEY] = owner_id
 
     async def ping(self) -> None:
         await self.session.execute(text("SELECT 1"))
