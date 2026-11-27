@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
+# Máximo de Integer en PostgreSQL: en la práctica, sin límite operativo.
+UNLIMITED_DATA = 2_147_483_647
+
 
 class AuditResult(StrEnum):
     SUCCESS = "success"
@@ -35,8 +38,8 @@ class ServerConfig:
     api_version: str = "1.4.1"
     setup_completed: bool = False
     # Referencia aprobada en D-17 del expediente (§ Valores de GetCap).
-    max_data_nodes: int = 10_000
-    max_data_points: int = 3_000_000
+    max_data_nodes: int = UNLIMITED_DATA
+    max_data_points: int = UNLIMITED_DATA
     growing_timeout_seconds: int = 3_600
     change_detection_seconds: int = 60
     max_request_latest_values: int = 500

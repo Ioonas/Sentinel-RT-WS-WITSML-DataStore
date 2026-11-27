@@ -9,6 +9,7 @@ import pytest
 from httpx import AsyncClient
 from lxml import etree
 
+from sentinel.audit_config.domain import UNLIMITED_DATA
 from sentinel.wmls_transport.wsdl import OFFICIAL_WSDL
 from sentinel.xml_schema.namespaces import (
     ACTION_NS,
@@ -213,11 +214,11 @@ async def test_wmls_discovery_and_crud(admin_client: AsyncClient, csrf: str) -> 
         "well",
         "wellbore",
     }
-    assert read_objects["log"].get("maxDataNodes") == "10000"
-    assert read_objects["log"].get("maxDataPoints") == "3000000"
-    assert read_objects["mudLog"].get("maxDataNodes") == "10000"
+    assert read_objects["log"].get("maxDataNodes") == str(UNLIMITED_DATA)
+    assert read_objects["log"].get("maxDataPoints") == str(UNLIMITED_DATA)
+    assert read_objects["mudLog"].get("maxDataNodes") == str(UNLIMITED_DATA)
     assert read_objects["mudLog"].get("maxDataPoints") is None
-    assert read_objects["trajectory"].get("maxDataNodes") == "10000"
+    assert read_objects["trajectory"].get("maxDataNodes") == str(UNLIMITED_DATA)
     assert read_objects["trajectory"].get("maxDataPoints") is None
     write_objects = {
         element.text: element
