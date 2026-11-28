@@ -27,3 +27,15 @@ def test_espera_vuelve_al_minimo_si_el_proceso_fue_estable() -> None:
     child.started_at = time.monotonic() - supervisor.STABLE_AFTER_SECONDS - 1
     supervisor._on_exit(child, 0)
     assert child.backoff == supervisor.BACKOFF_MIN_SECONDS * 2
+
+
+def test_ayuda_no_se_toma_como_servicio(capsys) -> None:
+    supervisor.main(["--help"])
+    assert "Uso:" in capsys.readouterr().out
+
+
+def test_servicio_desconocido_se_rechaza() -> None:
+    import pytest
+
+    with pytest.raises(SystemExit, match="Servicio desconocido"):
+        supervisor.main(["--help-me"])

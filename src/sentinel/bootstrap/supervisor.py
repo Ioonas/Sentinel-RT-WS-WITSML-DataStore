@@ -114,12 +114,25 @@ def run(services: list[str] | None = None) -> None:
         _stop_all(children)
 
 
+USAGE = """Uso: python -m sentinel.bootstrap.supervisor [api] [mail-worker]
+
+Sin argumentos levanta la API WITSML/administrativa (api) y el worker de correo
+(mail-worker). Con nombres, levanta solo esos servicios.
+"""
+
+
 def main(argv: list[str] | None = None) -> None:
+    args = sys.argv[1:] if argv is None else argv
+    if any(arg in ("-h", "--help", "/?") for arg in args):
+        print(USAGE)
+        return
+    unknown = [arg for arg in args if arg not in COMMANDS]
+    if unknown:
+        raise SystemExit(f"Servicio desconocido: {', '.join(unknown)}\n\n{USAGE}")
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    args = sys.argv[1:] if argv is None else argv
     run(args or None)
 
 
