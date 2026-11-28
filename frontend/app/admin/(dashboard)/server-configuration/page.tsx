@@ -30,7 +30,16 @@ type ServiceName = "witsml" | "admin" | "mail-worker";
 type ServiceTarget = ServiceName | "all";
 type Feedback = { tone: "ok" | "error"; text: string } | null;
 
+// Nombre de cada servicio en tarjetas y en mensajes, y orden en que se muestran.
 const SERVICE_LABELS: Record<string, string> = {
+  witsml: "API WITSML",
+  admin: "API administrativa",
+  "mail-worker": "Worker de correo",
+};
+const SERVICE_ORDER: string[] = ["witsml", "admin", "mail-worker"];
+
+// Frases para mensajes: "la API WITSML", "el worker de correo".
+const SERVICE_SENTENCE: Record<string, string> = {
   witsml: "la API WITSML",
   admin: "la API administrativa",
   "mail-worker": "el worker de correo",
@@ -310,7 +319,7 @@ export default function ServerConfigurationPage() {
   async function requestRestart(target: ServiceTarget) {
     setRestartBusy(target);
     setRestartFeedback(null);
-    const label = target === "all" ? "todos los servicios" : (SERVICE_LABELS[target] ?? target);
+    const label = target === "all" ? "todos los servicios" : (SERVICE_SENTENCE[target] ?? target);
     try {
       await api<ServiceStatusView[]>("/server-config/restart", {
         method: "POST",
@@ -333,7 +342,7 @@ export default function ServerConfigurationPage() {
       ? ""
       : pendingRestart === "all"
         ? "todos los servicios"
-        : (SERVICE_LABELS[pendingRestart] ?? pendingRestart);
+        : (SERVICE_SENTENCE[pendingRestart] ?? pendingRestart);
 
   return (
     <div className={styles.stack}>
@@ -659,7 +668,9 @@ export default function ServerConfigurationPage() {
             ) : null}
 
             <div className={styles.grid}>
-              {(services.data ?? []).map((service) => (
+              {[...(services.data ?? [])]
+                .sort((a, b) => SERVICE_ORDER.indexOf(a.name) - SERVICE_ORDER.indexOf(b.name))
+                .map((service) => (
                 <ServiceRow
                   key={service.name}
                   service={service}
@@ -688,7 +699,7 @@ export default function ServerConfigurationPage() {
 
       {pendingRestart !== null ? (
         <ConfirmDialog
-          title={`Reiniciar ${restartLabel}`}
+          title={pendingRestart === "all" ? "Reiniciar todos los servicios" : `Reiniciar ${SERVICE_LABELS[pendingRestart] ?? ""}`}
           description={
             `Se reiniciará ${restartLabel}. Cada proceso termina sus operaciones en curso antes de salir ` +
             "(hasta 5 minutos). Mientras tanto, la API rechaza solicitudes nuevas de escritura y WMLS con 503."
