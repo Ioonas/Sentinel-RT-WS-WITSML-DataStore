@@ -139,8 +139,8 @@ class ServerConfigView(BaseModel):
 
 
 class ServiceRestartRequest(StrictModel):
-    # api, mail-worker o all. Cada servicio se reinicia por separado.
-    service: Literal["api", "mail-worker", "all"] = "all"
+    # witsml, admin, mail-worker o all. Cada servicio se reinicia por separado.
+    service: Literal["witsml", "admin", "mail-worker", "all"] = "all"
 
 
 class ServiceStatusView(BaseModel):

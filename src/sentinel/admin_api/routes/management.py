@@ -53,7 +53,13 @@ from sentinel.admin_api.schemas import (
     WebAccessListView,
     WebAccessUserView,
 )
-from sentinel.audit_config.domain import AuditEvent, MailJob, ServerConfig, ServiceRecord
+from sentinel.audit_config.domain import (
+    SERVICE_NAMES,
+    AuditEvent,
+    MailJob,
+    ServerConfig,
+    ServiceRecord,
+)
 from sentinel.bootstrap.container import RequestServices
 from sentinel.identity_access.domain import (
     ALL_ADMIN_PERMISSIONS,
@@ -278,7 +284,7 @@ async def restart_services(
     Cada proceso espera a que sus operaciones en curso terminen antes de salir; si no
     terminan a tiempo, cancela el reinicio y lo reporta en su estado.
     """
-    names = ["api", "mail-worker"] if payload.service == "all" else [payload.service]
+    names = list(SERVICE_NAMES) if payload.service == "all" else [payload.service]
     records = await services.services.request_restart(names, actor=auth.principal.name)
     await audit(
         services,

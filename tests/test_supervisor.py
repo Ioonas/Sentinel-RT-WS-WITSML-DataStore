@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import time
 
-from sentinel.audit_config.domain import SERVICE_API, SERVICE_MAIL_WORKER
+from sentinel.audit_config.domain import SERVICE_ADMIN, SERVICE_MAIL_WORKER, SERVICE_WITSML
 from sentinel.bootstrap import supervisor
 
 
 def test_comandos_cubren_los_dos_servicios() -> None:
-    assert set(supervisor.COMMANDS) == {SERVICE_API, SERVICE_MAIL_WORKER}
+    assert set(supervisor.COMMANDS) == {SERVICE_WITSML, SERVICE_ADMIN, SERVICE_MAIL_WORKER}
 
 
 def test_espera_crece_ante_fallas_rapidas() -> None:
-    child = supervisor.Child(name=SERVICE_API, started_at=time.monotonic())
+    child = supervisor.Child(name=SERVICE_WITSML, started_at=time.monotonic())
     supervisor._on_exit(child, 1)
     first = child.restart_at - time.monotonic()
     child.started_at = time.monotonic()

@@ -35,6 +35,7 @@ def create_app(
     container: Container,
     *,
     lifespan: Any | None = None,
+    role: str | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title=PRODUCT_NAME,
@@ -65,10 +66,14 @@ def create_app(
             expose_headers=["X-Correlation-ID"],
         )
 
-    app.include_router(wmls_router)
-    app.include_router(auth.router, prefix=ADMIN_PREFIX)
-    app.include_router(management.router, prefix=ADMIN_PREFIX)
-    app.include_router(operations.router, prefix=ADMIN_PREFIX)
+    # role None monta todo (desarrollo y pruebas); "witsml" o "admin" monta solo su parte.
+    if role in (None, "witsml"):
+        app.include_router(wmls_router)
+    if role in (None, "admin"):
+        app.include_router(auth.router, prefix=ADMIN_PREFIX)
+        app.include_router(management.router, prefix=ADMIN_PREFIX)
+        app.include_router(operations.router, prefix=ADMIN_PREFIX)
+    app.state.role = role
 
     @app.get("/health", tags=["Salud"])
     async def public_health(request: Request) -> dict[str, str]:

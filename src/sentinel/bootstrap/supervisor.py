@@ -4,8 +4,8 @@ Relanza cada proceso cuando termina, ya sea por un reinicio solicitado desde el 
 o por una falla. Si un proceso falla con frecuencia, espera más antes de relanzarlo
 (hasta 60 s). Al apagarse el supervisor, detiene a los hijos en orden.
 
-Uso: ``python -m sentinel.bootstrap.supervisor [api] [mail-worker]``.
-Sin argumentos levanta ambos. En Windows se ejecuta como servicio con NSSM o similar;
+Uso: ``python -m sentinel.bootstrap.supervisor [witsml] [admin] [mail-worker]``.
+Sin argumentos levanta los tres. En Windows se ejecuta como servicio con NSSM o similar;
 en Linux, con systemd (ver ``deploy/supervisor``).
 """
 
@@ -17,7 +17,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from sentinel.audit_config.domain import SERVICE_API, SERVICE_MAIL_WORKER, SERVICE_NAMES
+from sentinel.audit_config.domain import (
+    SERVICE_ADMIN,
+    SERVICE_MAIL_WORKER,
+    SERVICE_NAMES,
+    SERVICE_WITSML,
+)
 
 logger = logging.getLogger("sentinel.supervisor")
 
@@ -29,7 +34,16 @@ STOP_GRACE_SECONDS = 30.0
 POLL_SECONDS = 1.0
 
 COMMANDS: dict[str, list[str]] = {
-    SERVICE_API: [sys.executable, "-c", "from sentinel.bootstrap.cli import serve; serve()"],
+    SERVICE_WITSML: [
+        sys.executable,
+        "-c",
+        "from sentinel.bootstrap.cli import serve_witsml; serve_witsml()",
+    ],
+    SERVICE_ADMIN: [
+        sys.executable,
+        "-c",
+        "from sentinel.bootstrap.cli import serve_admin; serve_admin()",
+    ],
     SERVICE_MAIL_WORKER: [
         sys.executable,
         "-c",
@@ -114,10 +128,9 @@ def run(services: list[str] | None = None) -> None:
         _stop_all(children)
 
 
-USAGE = """Uso: python -m sentinel.bootstrap.supervisor [api] [mail-worker]
+USAGE = """Uso: python -m sentinel.bootstrap.supervisor [witsml] [admin] [mail-worker]
 
-Sin argumentos levanta la API WITSML/administrativa (api) y el worker de correo
-(mail-worker). Con nombres, levanta solo esos servicios.
+Sin argumentos levanta los tres servicios. Con nombres, levanta solo esos.
 """
 
 

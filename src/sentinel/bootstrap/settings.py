@@ -22,7 +22,10 @@ class Settings(BaseSettings):
 
     env: str = "development"
     host: str = "0.0.0.0"
-    port: int = 8000
+    # Un proceso por rol: la administrativa (y el panel) y la WITSML (detrás de nginx).
+    api_role: str = "admin"
+    admin_port: int = 50100
+    witsml_port: int = 50101
     database_url: str = (
         "postgresql+asyncpg://sentinel:sentinel_dev@localhost:5432/sentinel"
     )

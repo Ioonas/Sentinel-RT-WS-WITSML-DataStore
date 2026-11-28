@@ -53,9 +53,10 @@ class ServerConfig:
     updated_by: str | None = None
 
 
-SERVICE_API = "api"
+SERVICE_WITSML = "witsml"
+SERVICE_ADMIN = "admin"
 SERVICE_MAIL_WORKER = "mail-worker"
-SERVICE_NAMES: tuple[str, ...] = (SERVICE_API, SERVICE_MAIL_WORKER)
+SERVICE_NAMES: tuple[str, ...] = (SERVICE_WITSML, SERVICE_ADMIN, SERVICE_MAIL_WORKER)
 
 
 @dataclass

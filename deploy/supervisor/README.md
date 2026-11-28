@@ -34,3 +34,38 @@ Las variables de entorno (`SENTINEL_*`) deben estar disponibles para el servicio
 
 Para levantar solo uno: `python -m sentinel.bootstrap.supervisor api` o
 `python -m sentinel.bootstrap.supervisor mail-worker`.
+
+## Servicios y puertos
+
+El supervisor levanta tres procesos:
+
+| Servicio | Qué sirve | Puerto (por defecto) |
+|---|---|---|
+| `witsml` | Store API WMLS (`/witsml`) | 50101 (interno) |
+| `admin` | API administrativa (`/admin-api/v1`) y panel | 50100 |
+| `mail-worker` | Cola de correo | — |
+
+Cada uno tiene su propio botón de reinicio en el panel.
+
+### nginx
+
+El WITSML queda detrás de nginx en la misma URL pública que ya usan los clientes.
+Enruta `/witsml` al proceso WITSML y el resto al administrativo:
+
+```nginx
+location /witsml {
+    proxy_pass http://127.0.0.1:50101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 20m;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:50100;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Ajusta los puertos si cambiaste `SENTINEL_ADMIN_PORT` o `SENTINEL_WITSML_PORT`.
+El panel sigue apuntando a `SENTINEL_API_URL=http://127.0.0.1:50100`.

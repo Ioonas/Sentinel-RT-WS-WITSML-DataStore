@@ -25,8 +25,11 @@ const SECTIONS = [
 
 type Feedback = { tone: "ok" | "error"; text: string } | null;
 
+type ServiceName = "witsml" | "admin" | "mail-worker";
+
 const SERVICE_LABELS: Record<string, string> = {
-  api: "la API WITSML y la administrativa",
+  witsml: "la API WITSML",
+  admin: "la API administrativa",
   "mail-worker": "el worker de correo",
 };
 
@@ -46,7 +49,7 @@ function ServiceRow({
   service: ServiceStatusView;
   canEdit: boolean;
   busy: boolean;
-  onRestart: (name: "api" | "mail-worker") => void;
+  onRestart: (name: ServiceName) => void;
 }) {
   const unreachable = service.stale;
   const stateLabel = unreachable ? "Sin respuesta" : (STATE_LABELS[service.state] ?? service.state);
@@ -83,7 +86,7 @@ function ServiceRow({
           <Button
             variant="danger"
             disabled={!canEdit || busy || unreachable}
-            onClick={() => onRestart(service.name as "api" | "mail-worker")}
+            onClick={() => onRestart(service.name as ServiceName)}
           >
             {busy ? "Solicitando…" : "Reiniciar"}
           </Button>
@@ -236,7 +239,7 @@ export default function ServerConfigurationPage() {
     }
   }
 
-  async function requestRestart(service: "api" | "mail-worker" | "all") {
+  async function requestRestart(service: ServiceName | "all") {
     const label = SERVICE_LABELS[service] ?? "todos los servicios";
     const confirmed = window.confirm(
       `Se reiniciará ${label}. Cada proceso termina sus operaciones en curso antes de salir ` +
