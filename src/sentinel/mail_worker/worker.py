@@ -12,9 +12,9 @@ import smtplib
 from datetime import timedelta
 from email.message import EmailMessage
 
-from sentinel.audit_config.domain import AuditChannel, AuditResult, MailJob
+from sentinel.audit_config.domain import SERVICE_MAIL_WORKER, AuditChannel, AuditResult, MailJob
 from sentinel.bootstrap.container import Container
-from sentinel.bootstrap.restart import current_generation, wait_for_restart
+from sentinel.bootstrap.restart import ServiceLifecycle
 from sentinel.bootstrap.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -84,22 +84,26 @@ async def run_forever(settings: Settings | None = None) -> None:
     resolved = settings or Settings()
     container = Container(resolved)
     worker = MailWorker(container)
+    lifecycle = ServiceLifecycle(container, SERVICE_MAIL_WORKER)
     logger.info("Worker de correo iniciado (intervalo %ss)", resolved.mail_worker_interval_seconds)
-    started_generation = await current_generation(container)
-    restart_requested = asyncio.Event()
-    watcher = asyncio.create_task(
-        wait_for_restart(container, started_generation, restart_requested.set)
-    )
+    await lifecycle.start()
     try:
-        while not restart_requested.is_set():
+        while not lifecycle.restart_event.is_set():
+            # Mientras drena no toma lotes nuevos; el lote en curso termina antes de salir.
+            if lifecycle.draining:
+                await asyncio.sleep(resolved.mail_worker_interval_seconds)
+                continue
+            lifecycle.in_flight += 1
             try:
                 processed = await worker.run_once()
             except Exception:  # noqa: BLE001 - el worker no debe morir por un ciclo
                 logger.exception("Ciclo del worker de correo falló")
                 processed = 0
+            finally:
+                lifecycle.in_flight -= 1
             if not processed:
                 await asyncio.sleep(resolved.mail_worker_interval_seconds)
         logger.warning("Worker de correo se detiene para reiniciarse")
     finally:
-        watcher.cancel()
+        await lifecycle.stop()
         await container.dispose()

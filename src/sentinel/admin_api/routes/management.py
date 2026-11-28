@@ -45,13 +45,15 @@ from sentinel.admin_api.schemas import (
     ServiceAccountUpdate,
     ServiceAccountView,
     ServiceInfoUpdateRequest,
+    ServiceRestartRequest,
+    ServiceStatusView,
     UserView,
     WebAccessInvitationView,
     WebAccessInviteRequest,
     WebAccessListView,
     WebAccessUserView,
 )
-from sentinel.audit_config.domain import AuditEvent, MailJob, ServerConfig
+from sentinel.audit_config.domain import AuditEvent, MailJob, ServerConfig, ServiceRecord
 from sentinel.bootstrap.container import RequestServices
 from sentinel.identity_access.domain import (
     ALL_ADMIN_PERMISSIONS,
@@ -120,9 +122,24 @@ def _config_view(config: ServerConfig) -> ServerConfigView:
         mail_from=config.mail_from,
         mail_max_attempts=config.mail_max_attempts,
         mail_backoff_base_seconds=config.mail_backoff_base_seconds,
-        restart_generation=config.restart_generation,
         updated_at=config.updated_at,
         updated_by=config.updated_by,
+    )
+
+
+def _service_view(record: ServiceRecord, *, stale: bool) -> ServiceStatusView:
+    return ServiceStatusView(
+        name=record.name,
+        state=record.state,
+        pid=record.pid,
+        in_flight=record.in_flight,
+        started_at=record.started_at,
+        heartbeat_at=record.heartbeat_at,
+        stale=stale,
+        requested_generation=record.requested_generation,
+        requested_at=record.requested_at,
+        requested_by=record.requested_by,
+        last_error=record.last_error,
     )
 
 
@@ -238,24 +255,39 @@ async def update_mail(
     return _config_view(config)
 
 
-@router.post("/server-config/restart", response_model=ServerConfigView, status_code=202)
+@router.get("/server-config/services", response_model=list[ServiceStatusView])
+async def list_service_status(
+    _: AuthContext = Depends(get_auth),
+    services: RequestServices = Depends(get_services),
+) -> list[ServiceStatusView]:
+    records = await services.services.list_services()
+    return [_service_view(record, stale=services.services.is_stale(record)) for record in records]
+
+
+@router.post("/server-config/restart", response_model=list[ServiceStatusView], status_code=202)
 async def restart_services(
+    payload: ServiceRestartRequest,
     request: Request,
     auth: AuthContext = Depends(require_superadmin),
     _: AuthContext = Depends(require_csrf),
     __: AuthContext = Depends(require_recent_auth),
     services: RequestServices = Depends(get_services),
-) -> ServerConfigView:
-    """Reinicio controlado de la API y del worker de correo, para fallas críticas."""
-    config = await services.config.request_restart(actor=auth.principal.name)
+) -> list[ServiceStatusView]:
+    """Solicita el reinicio de uno o de todos los servicios.
+
+    Cada proceso espera a que sus operaciones en curso terminen antes de salir; si no
+    terminan a tiempo, cancela el reinicio y lo reporta en su estado.
+    """
+    names = ["api", "mail-worker"] if payload.service == "all" else [payload.service]
+    records = await services.services.request_restart(names, actor=auth.principal.name)
     await audit(
         services,
         auth,
         action="server-config.restart.requested",
         correlation=correlation_id(request),
-        details={"restart_generation": config.restart_generation},
+        details={"services": names},
     )
-    return _config_view(config)
+    return [_service_view(record, stale=services.services.is_stale(record)) for record in records]
 
 
 @router.put("/server-config/service-info", response_model=ServerConfigView)

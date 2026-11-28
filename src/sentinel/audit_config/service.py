@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from sentinel.audit_config.domain import (
+    SERVICE_NAMES,
     UNLIMITED_DATA,
     AuditChannel,
     AuditEvent,
@@ -19,11 +20,13 @@ from sentinel.audit_config.domain import (
     MailJob,
     MailKind,
     ServerConfig,
+    ServiceRecord,
 )
 from sentinel.audit_config.ports import (
     AuditRepositoryPort,
     MailOutboxPort,
     ServerConfigRepositoryPort,
+    ServiceControlPort,
 )
 from sentinel.identity_access.domain import HumanRole
 from sentinel.identity_access.service import IdentityService
@@ -33,6 +36,55 @@ from sentinel.shared.ids import IdGenerator
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE = re.compile(r"^[+()0-9.\-\s]{6,32}$")
+
+
+class ServiceControlService:
+    """Estado de los procesos del servidor y reinicios solicitados desde el panel."""
+
+    # Un proceso sin heartbeat en este intervalo se muestra como sin respuesta.
+    STALE_AFTER_SECONDS = 30
+
+    def __init__(self, repository: ServiceControlPort, clock: Clock) -> None:
+        self._repo = repository
+        self._clock = clock
+
+    async def list_services(self) -> list[ServiceRecord]:
+        return await self._repo.list_services()
+
+    async def get_record(self, name: str) -> ServiceRecord | None:
+        return await self._repo.get_service(name)
+
+    async def request_restart(self, names: list[str], *, actor: str) -> list[ServiceRecord]:
+        unknown = [name for name in names if name not in SERVICE_NAMES]
+        if unknown:
+            raise ValidationError("Servicio desconocido: " + ", ".join(unknown))
+        return await self._repo.request_restart(names, actor, self._clock.now())
+
+    async def heartbeat(
+        self,
+        name: str,
+        *,
+        pid: int,
+        state: str,
+        in_flight: int,
+        started_at: datetime | None,
+        last_error: str | None = None,
+    ) -> None:
+        await self._repo.heartbeat(
+            name,
+            pid=pid,
+            state=state,
+            in_flight=in_flight,
+            started_at=started_at,
+            now=self._clock.now(),
+            last_error=last_error,
+        )
+
+    def is_stale(self, record: ServiceRecord) -> bool:
+        if record.heartbeat_at is None:
+            return True
+        age = self._clock.now() - record.heartbeat_at
+        return age.total_seconds() > self.STALE_AFTER_SECONDS
 
 
 class ConfigService:
@@ -117,15 +169,6 @@ class ConfigService:
         config.mail_from = sender
         config.mail_max_attempts = max_attempts
         config.mail_backoff_base_seconds = backoff_base_seconds
-        config.updated_at = self._clock.now()
-        config.updated_by = actor
-        await self._repo.save(config)
-        return config
-
-    async def request_restart(self, *, actor: str) -> ServerConfig:
-        """Incrementa la generación: API y worker la ven y terminan para reiniciarse."""
-        config = await self.get()
-        config.restart_generation += 1
         config.updated_at = self._clock.now()
         config.updated_by = actor
         await self._repo.save(config)

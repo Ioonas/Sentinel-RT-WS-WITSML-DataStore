@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from sentinel.audit_config.domain import (
+    SERVICE_NAMES,
     AuditChannel,
     AuditEvent,
     AuditResult,
     MailJob,
     ServerConfig,
+    ServiceRecord,
 )
 from sentinel.identity_access.domain import Grant, HumanRole, ServiceRole, WitsmlAction
 from sentinel.identity_access.ports import (
@@ -40,6 +42,7 @@ from sentinel.persistence.tables import (
     PasswordResetRow,
     ServerConfigRow,
     ServiceAccountRow,
+    ServiceStatusRow,
     TrajectoryRow,
     TrajectoryStationRow,
     WellboreRow,
@@ -1029,7 +1032,6 @@ class SqlAlchemyConfigRepository:
             "mail_from",
             "mail_max_attempts",
             "mail_backoff_base_seconds",
-            "restart_generation",
             "updated_at",
             "updated_by",
         ):
@@ -1059,10 +1061,87 @@ class SqlAlchemyConfigRepository:
             mail_from=row.mail_from,
             mail_max_attempts=row.mail_max_attempts,
             mail_backoff_base_seconds=row.mail_backoff_base_seconds,
-            restart_generation=row.restart_generation,
             updated_at=row.updated_at,
             updated_by=row.updated_by,
         )
+
+
+class SqlAlchemyServiceControl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def _ensure_rows(self) -> None:
+        for name in SERVICE_NAMES:
+            if await self._session.get(ServiceStatusRow, name) is None:
+                self._session.add(ServiceStatusRow(name=name, requested_generation=0))
+        await self._session.flush()
+
+    async def list_services(self) -> list[ServiceRecord]:
+        await self._ensure_rows()
+        stmt = select(ServiceStatusRow).order_by(ServiceStatusRow.name)
+        rows = (await self._session.scalars(stmt)).all()
+        return [_to_service(row) for row in rows]
+
+    async def get_service(self, name: str) -> ServiceRecord | None:
+        row = await self._session.get(ServiceStatusRow, name)
+        return _to_service(row) if row else None
+
+    async def request_restart(
+        self, names: list[str], actor: str, now: datetime
+    ) -> list[ServiceRecord]:
+        await self._ensure_rows()
+        records: list[ServiceRecord] = []
+        for name in names:
+            row = await self._session.get(ServiceStatusRow, name)
+            if row is None:
+                row = ServiceStatusRow(
+                    name=name, requested_generation=0, state="stopped", in_flight=0
+                )
+                self._session.add(row)
+            row.requested_generation += 1
+            row.requested_at = now
+            row.requested_by = actor
+            await self._session.flush()
+            records.append(_to_service(row))
+        return records
+
+    async def heartbeat(
+        self,
+        name: str,
+        *,
+        pid: int,
+        state: str,
+        in_flight: int,
+        started_at: datetime | None,
+        now: datetime,
+        last_error: str | None,
+    ) -> None:
+        row = await self._session.get(ServiceStatusRow, name)
+        if row is None:
+            row = ServiceStatusRow(name=name, requested_generation=0)
+            self._session.add(row)
+        row.pid = pid
+        row.state = state
+        row.in_flight = in_flight
+        row.started_at = started_at or row.started_at
+        row.heartbeat_at = now
+        row.last_error = last_error
+        await self._session.flush()
+
+
+def _to_service(row: ServiceStatusRow) -> ServiceRecord:
+    return ServiceRecord(
+        name=row.name,
+        requested_generation=row.requested_generation,
+        requested_at=row.requested_at,
+        requested_by=row.requested_by,
+        pid=row.pid,
+        state=row.state,
+        in_flight=row.in_flight,
+        started_at=row.started_at,
+        heartbeat_at=row.heartbeat_at,
+        last_error=row.last_error,
+    )
 
 
 class SqlAlchemyIdentityRepository:
@@ -1652,6 +1731,7 @@ class SqlAlchemyRepositories:
         self.identities = SqlAlchemyIdentityRepository(session)
         self.mail = SqlAlchemyMailOutbox(session)
         self.assignments = SqlAlchemyObjectAssignments(session)
+        self.services = SqlAlchemyServiceControl(session)
 
     def bind_owner(self, owner_id: str | None) -> None:
         """Limita todas las lecturas y escrituras de objetos a una cuenta de servicio.

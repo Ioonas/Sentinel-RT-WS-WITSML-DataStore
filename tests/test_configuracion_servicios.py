@@ -46,16 +46,57 @@ async def test_mail_rejects_invalid_values(admin_client: AsyncClient, csrf: str)
     assert invalid_sender.status_code == 422, invalid_sender.text
 
 
-async def test_restart_requires_csrf_and_bumps_generation(
-    admin_client: AsyncClient, csrf: str
-) -> None:
-    before = (await admin_client.get("/admin-api/v1/server-config")).json()["restart_generation"]
+def _by_name(rows: list[dict]) -> dict[str, dict]:
+    return {row["name"]: row for row in rows}
 
-    rejected = await admin_client.post("/admin-api/v1/server-config/restart")
+
+async def test_restart_requires_csrf(admin_client: AsyncClient) -> None:
+    rejected = await admin_client.post(
+        "/admin-api/v1/server-config/restart", json={"service": "api"}
+    )
     assert rejected.status_code == 403
 
+
+async def test_restart_is_per_service(admin_client: AsyncClient, csrf: str) -> None:
+    before = _by_name((await admin_client.get("/admin-api/v1/server-config/services")).json())
+
     accepted = await admin_client.post(
-        "/admin-api/v1/server-config/restart", headers={"x-csrf-token": csrf}
+        "/admin-api/v1/server-config/restart",
+        headers={"x-csrf-token": csrf},
+        json={"service": "api"},
     )
     assert accepted.status_code == 202, accepted.text
-    assert accepted.json()["restart_generation"] == before + 1
+    assert [row["name"] for row in accepted.json()] == ["api"]
+    assert accepted.json()[0]["requested_generation"] == before["api"]["requested_generation"] + 1
+
+    after = _by_name((await admin_client.get("/admin-api/v1/server-config/services")).json())
+    assert (
+        after["mail-worker"]["requested_generation"]
+        == before["mail-worker"]["requested_generation"]
+    )
+
+
+async def test_restart_all_bumps_every_service(admin_client: AsyncClient, csrf: str) -> None:
+    before = _by_name((await admin_client.get("/admin-api/v1/server-config/services")).json())
+    accepted = await admin_client.post(
+        "/admin-api/v1/server-config/restart", headers={"x-csrf-token": csrf}, json={}
+    )
+    assert accepted.status_code == 202, accepted.text
+    after = _by_name(accepted.json())
+    for name in ("api", "mail-worker"):
+        assert after[name]["requested_generation"] == before[name]["requested_generation"] + 1
+
+
+async def test_restart_rejects_unknown_service(admin_client: AsyncClient, csrf: str) -> None:
+    response = await admin_client.post(
+        "/admin-api/v1/server-config/restart",
+        headers={"x-csrf-token": csrf},
+        json={"service": "base-de-datos"},
+    )
+    assert response.status_code == 422
+
+
+async def test_services_list_reports_both_processes(admin_client: AsyncClient) -> None:
+    rows = _by_name((await admin_client.get("/admin-api/v1/server-config/services")).json())
+    assert set(rows) == {"api", "mail-worker"}
+    assert rows["api"]["stale"] is True  # ningún proceso de prueba envía heartbeat

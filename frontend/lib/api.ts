@@ -152,9 +152,22 @@ export type ServerConfigView = {
   mail_from: string;
   mail_max_attempts: number;
   mail_backoff_base_seconds: number;
-  restart_generation: number;
   updated_at: string | null;
   updated_by: string | null;
+};
+
+export type ServiceStatusView = {
+  name: string;
+  state: string;
+  pid: number | null;
+  in_flight: number;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  stale: boolean;
+  requested_generation: number;
+  requested_at: string | null;
+  requested_by: string | null;
+  last_error: string | null;
 };
 
 export type ServiceAccountView = {

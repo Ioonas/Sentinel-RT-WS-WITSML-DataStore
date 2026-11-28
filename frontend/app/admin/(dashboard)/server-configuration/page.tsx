@@ -3,7 +3,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Alert, Button, Card, Field, Input, PageHeader, Spinner, StatusBadge } from "@/components/ui";
 import { Section, Stat } from "@/components/dashboard";
-import { ApiError, api, type ServerConfigView, type SessionView } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type ServerConfigView,
+  type ServiceStatusView,
+  type SessionView,
+} from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useApiQuery } from "@/lib/hooks";
 import styles from "../dashboard.module.css";
@@ -18,6 +24,75 @@ const SECTIONS = [
 ] as const;
 
 type Feedback = { tone: "ok" | "error"; text: string } | null;
+
+const SERVICE_LABELS: Record<string, string> = {
+  api: "la API WITSML y la administrativa",
+  "mail-worker": "el worker de correo",
+};
+
+const STATE_LABELS: Record<string, string> = {
+  running: "En ejecución",
+  draining: "Terminando operaciones",
+  restarting: "Reiniciando",
+  stopped: "Detenido",
+};
+
+function ServiceRow({
+  service,
+  canEdit,
+  busy,
+  onRestart,
+}: {
+  service: ServiceStatusView;
+  canEdit: boolean;
+  busy: boolean;
+  onRestart: (name: "api" | "mail-worker") => void;
+}) {
+  const unreachable = service.stale;
+  const stateLabel = unreachable ? "Sin respuesta" : (STATE_LABELS[service.state] ?? service.state);
+  const pending = service.requested_generation > 0 && service.state === "draining";
+  return (
+    <Card>
+      <Section title={SERVICE_LABELS[service.name] ?? service.name}>
+        <dl className={styles.detailsGrid}>
+          <dt>Estado</dt>
+          <dd>{stateLabel}</dd>
+          <dt>Operaciones en curso</dt>
+          <dd>{service.in_flight}</dd>
+          <dt>Proceso (PID)</dt>
+          <dd>{service.pid ?? "—"}</dd>
+          <dt>Último latido</dt>
+          <dd>{formatDateTime(service.heartbeat_at)}</dd>
+          <dt>Último reinicio solicitado</dt>
+          <dd>
+            {service.requested_at
+              ? `${formatDateTime(service.requested_at)} por ${service.requested_by ?? "—"}`
+              : "—"}
+          </dd>
+          {service.last_error ? (
+            <>
+              <dt>Último aviso</dt>
+              <dd>{service.last_error}</dd>
+            </>
+          ) : null}
+        </dl>
+        {pending ? (
+          <p className={styles.faint}>Esperando a que terminen las operaciones en curso.</p>
+        ) : null}
+        <div className={styles.actions}>
+          <Button
+            variant="danger"
+            disabled={!canEdit || busy || unreachable}
+            onClick={() => onRestart(service.name as "api" | "mail-worker")}
+          >
+            {busy ? "Solicitando…" : "Reiniciar"}
+          </Button>
+        </div>
+      </Section>
+    </Card>
+  );
+}
+
 
 function Notice({ feedback }: { feedback: Feedback }) {
   if (!feedback) return null;
@@ -56,8 +131,9 @@ export default function ServerConfigurationPage() {
   const [mailBusy, setMailBusy] = useState(false);
   const [mailFeedback, setMailFeedback] = useState<Feedback>(null);
 
-  // Servicios: reinicio controlado.
-  const [restartBusy, setRestartBusy] = useState(false);
+  // Servicios: estado de cada proceso y reinicio independiente.
+  const services = useApiQuery<ServiceStatusView[]>("/server-config/services");
+  const [restartBusy, setRestartBusy] = useState<string | null>(null);
   const [restartFeedback, setRestartFeedback] = useState<Feedback>(null);
 
   useEffect(() => {
@@ -160,25 +236,29 @@ export default function ServerConfigurationPage() {
     }
   }
 
-  async function requestRestart() {
+  async function requestRestart(service: "api" | "mail-worker" | "all") {
+    const label = SERVICE_LABELS[service] ?? "todos los servicios";
     const confirmed = window.confirm(
-      "Se reiniciarán la API WITSML, la API administrativa y el worker de correo. " +
-        "El panel puede desconectarse unos segundos. ¿Continuar?",
+      `Se reiniciará ${label}. Cada proceso termina sus operaciones en curso antes de salir ` +
+        "(hasta 5 minutos); si no terminan, el reinicio se cancela. ¿Continuar?",
     );
     if (!confirmed) return;
-    setRestartBusy(true);
+    setRestartBusy(service);
     setRestartFeedback(null);
     try {
-      await api<ServerConfigView>("/server-config/restart", { method: "POST" });
+      await api<ServiceStatusView[]>("/server-config/restart", {
+        method: "POST",
+        body: JSON.stringify({ service }),
+      });
       setRestartFeedback({
         tone: "ok",
-        text: "Reinicio solicitado. Los servicios se detienen y su supervisor los vuelve a levantar en unos segundos.",
+        text: `Reinicio solicitado para ${label}. Esperando a que terminen sus operaciones en curso.`,
       });
-      reload();
+      services.reload();
     } catch (caught) {
       setRestartFeedback({ tone: "error", text: errorText(caught, "No se pudo solicitar el reinicio.") });
     } finally {
-      setRestartBusy(false);
+      setRestartBusy(null);
     }
   }
 
@@ -431,26 +511,36 @@ export default function ServerConfigurationPage() {
 
           <section id="servicios" aria-labelledby="servicios-title" className={styles.stack}>
             <h2 id="servicios-title">Servicios</h2>
-            <Card>
-              <Section
-                title="Reinicio de servicios"
-                description="Para fallas críticas: reinicia la API WITSML, la API administrativa y el worker de correo. Requiere un supervisor (servicio de Windows, systemd o similar) que los vuelva a levantar."
+            <p className={styles.faint}>
+              Reinicio por servicio, para fallas críticas. Un servicio que no responde o que
+              tiene operaciones en curso se muestra así; el reinicio espera a que terminen. Requiere
+              un supervisor que los relance (ver deploy/supervisor).
+            </p>
+            <Notice feedback={restartFeedback} />
+            <div className={styles.grid}>
+              {(services.data ?? []).map((service) => (
+                <ServiceRow
+                  key={service.name}
+                  service={service}
+                  canEdit={canEdit}
+                  busy={restartBusy === service.name || restartBusy === "all"}
+                  onRestart={requestRestart}
+                />
+              ))}
+            </div>
+            {services.error ? <Alert>{services.error.message}</Alert> : null}
+            <div className={styles.actions}>
+              <Button
+                variant="danger"
+                disabled={!canEdit || restartBusy !== null}
+                onClick={() => requestRestart("all")}
               >
-                <Notice feedback={restartFeedback} />
-                <dl className={styles.detailsGrid}>
-                  <dt>Reinicios solicitados</dt>
-                  <dd>{data.restart_generation}</dd>
-                </dl>
-                <div className={styles.actions}>
-                  <Button variant="danger" disabled={!canEdit || restartBusy} onClick={requestRestart}>
-                    {restartBusy ? "Solicitando…" : "Reiniciar todos los servicios"}
-                  </Button>
-                </div>
-                <p className={styles.faint}>
-                  Solo superadministrador, con sesión reciente y token CSRF. Cada reinicio queda auditado.
-                </p>
-              </Section>
-            </Card>
+                {restartBusy === "all" ? "Solicitando…" : "Reiniciar todos los servicios"}
+              </Button>
+            </div>
+            <p className={styles.faint}>
+              Solo superadministrador, con sesión reciente y token CSRF. Cada reinicio queda auditado.
+            </p>
           </section>
         </>
       ) : null}

@@ -1,0 +1,20 @@
+# Unidad systemd del supervisor de Sentinel (API WITSML, API administrativa y worker de correo).
+# Ajustar rutas y usuario. El supervisor relanza los procesos cuando el panel solicita un reinicio.
+[Unit]
+Description=Sentinel RT&WS WITSML DataStore (supervisor)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sentinel
+WorkingDirectory=/opt/sentinel
+EnvironmentFile=/etc/sentinel/sentinel.env
+ExecStart=/opt/sentinel/venv/bin/python -m sentinel.bootstrap.supervisor
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

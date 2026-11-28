@@ -239,7 +239,6 @@ class ServerConfigRow(Base):
     mail_from: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     mail_max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     mail_backoff_base_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
-    restart_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(String(255))
 
@@ -329,6 +328,20 @@ class ServiceAccountRow(Base):
     replaced_by_id: Mapped[str | None] = mapped_column(String(64))
     replacement_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ServiceStatusRow(Base):
+    __tablename__ = "service_status"
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    requested_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_by: Mapped[str | None] = mapped_column(String(255))
+    pid: Mapped[int | None] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="stopped")
+    in_flight: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
 
 
 class MailOutboxRow(Base):

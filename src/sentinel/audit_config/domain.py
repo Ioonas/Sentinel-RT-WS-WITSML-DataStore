@@ -49,11 +49,30 @@ class ServerConfig:
     mail_from: str = ""
     mail_max_attempts: int = 5
     mail_backoff_base_seconds: int = 30
-    # Cada reinicio solicitado desde el panel incrementa este contador; los procesos
-    # que lo ven cambiar terminan para que su supervisor los vuelva a levantar.
-    restart_generation: int = 0
     updated_at: datetime | None = None
     updated_by: str | None = None
+
+
+SERVICE_API = "api"
+SERVICE_MAIL_WORKER = "mail-worker"
+SERVICE_NAMES: tuple[str, ...] = (SERVICE_API, SERVICE_MAIL_WORKER)
+
+
+@dataclass
+class ServiceRecord:
+    """Estado de un proceso del servidor: lo reporta el propio proceso (heartbeat)."""
+
+    name: str
+    requested_generation: int = 0
+    requested_at: datetime | None = None
+    requested_by: str | None = None
+    pid: int | None = None
+    # running | draining | restarting | stopped (vacío si nunca reportó)
+    state: str = "stopped"
+    in_flight: int = 0
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    last_error: str | None = None
 
 
 @dataclass

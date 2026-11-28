@@ -17,6 +17,7 @@ from sentinel.audit_config.service import (
     ConfigService,
     HealthService,
     MailService,
+    ServiceControlService,
     SetupService,
 )
 from sentinel.bootstrap.settings import Settings
@@ -45,6 +46,7 @@ class RequestServices:
     witsml: WitsmlStoreService
     inventory: InventoryService
     health: HealthService
+    services: ServiceControlService
 
 
 class Container:
@@ -82,6 +84,7 @@ class Container:
                 repos.identities, self.hasher, self.token_hasher, self.clock, self.ids
             )
             config = ConfigService(repos.config, self.clock)
+            service_control = ServiceControlService(repos.services, self.clock)
             audit = AuditService(repos.audit, self.clock)
             setup = SetupService(
                 config, identities, audit, self.clock, smtp_check=self.smtp_check
@@ -126,6 +129,7 @@ class Container:
                 witsml=witsml,
                 inventory=inventory,
                 health=health,
+                services=service_control,
             )
             try:
                 yield services

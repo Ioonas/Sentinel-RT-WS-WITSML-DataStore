@@ -5,13 +5,35 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from sentinel.audit_config.domain import AuditEvent, MailJob, ServerConfig
+from sentinel.audit_config.domain import AuditEvent, MailJob, ServerConfig, ServiceRecord
 
 
 class ServerConfigRepositoryPort(Protocol):
     async def get(self) -> ServerConfig | None: ...
 
     async def save(self, config: ServerConfig) -> None: ...
+
+
+class ServiceControlPort(Protocol):
+    async def list_services(self) -> list[ServiceRecord]: ...
+
+    async def get_service(self, name: str) -> ServiceRecord | None: ...
+
+    async def request_restart(
+        self, names: list[str], actor: str, now: datetime
+    ) -> list[ServiceRecord]: ...
+
+    async def heartbeat(
+        self,
+        name: str,
+        *,
+        pid: int,
+        state: str,
+        in_flight: int,
+        started_at: datetime | None,
+        now: datetime,
+        last_error: str | None,
+    ) -> None: ...
 
 
 class AuditRepositoryPort(Protocol):

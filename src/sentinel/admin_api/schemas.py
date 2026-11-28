@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -133,9 +134,27 @@ class ServerConfigView(BaseModel):
     mail_from: str = ""
     mail_max_attempts: int = 5
     mail_backoff_base_seconds: int = 30
-    restart_generation: int = 0
     updated_at: datetime | None = None
     updated_by: str | None = None
+
+
+class ServiceRestartRequest(StrictModel):
+    # api, mail-worker o all. Cada servicio se reinicia por separado.
+    service: Literal["api", "mail-worker", "all"] = "all"
+
+
+class ServiceStatusView(BaseModel):
+    name: str
+    state: str
+    pid: int | None = None
+    in_flight: int
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    stale: bool
+    requested_generation: int
+    requested_at: datetime | None = None
+    requested_by: str | None = None
+    last_error: str | None = None
 
 
 class ServiceAccountCreate(StrictModel):
