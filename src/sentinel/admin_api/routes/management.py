@@ -33,6 +33,7 @@ from sentinel.admin_api.schemas import (
     LimitsUpdateRequest,
     MailOutboxPage,
     MailOutboxView,
+    MailUpdateRequest,
     MessageView,
     PermissionView,
     ProfileSessionView,
@@ -116,6 +117,10 @@ def _config_view(config: ServerConfig) -> ServerConfigView:
         max_request_latest_values=config.max_request_latest_values,
         cascaded_delete=config.cascaded_delete,
         support_uom_conversion=config.support_uom_conversion,
+        mail_from=config.mail_from,
+        mail_max_attempts=config.mail_max_attempts,
+        mail_backoff_base_seconds=config.mail_backoff_base_seconds,
+        restart_generation=config.restart_generation,
         updated_at=config.updated_at,
         updated_by=config.updated_by,
     )
@@ -200,6 +205,55 @@ async def update_limits(
             "change_detection_seconds": payload.change_detection_seconds,
             "max_request_latest_values": payload.max_request_latest_values,
         },
+    )
+    return _config_view(config)
+
+
+@router.put("/server-config/mail", response_model=ServerConfigView)
+async def update_mail(
+    payload: MailUpdateRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_superadmin),
+    _: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ServerConfigView:
+    """Remitente y reintentos del correo. Credenciales SMTP siguen siendo de entorno."""
+    config = await services.config.update_mail(
+        mail_from=payload.mail_from,
+        max_attempts=payload.mail_max_attempts,
+        backoff_base_seconds=payload.mail_backoff_base_seconds,
+        actor=auth.principal.name,
+    )
+    await audit(
+        services,
+        auth,
+        action="server-config.mail.updated",
+        correlation=correlation_id(request),
+        details={
+            "mail_from": payload.mail_from,
+            "mail_max_attempts": payload.mail_max_attempts,
+            "mail_backoff_base_seconds": payload.mail_backoff_base_seconds,
+        },
+    )
+    return _config_view(config)
+
+
+@router.post("/server-config/restart", response_model=ServerConfigView, status_code=202)
+async def restart_services(
+    request: Request,
+    auth: AuthContext = Depends(require_superadmin),
+    _: AuthContext = Depends(require_csrf),
+    __: AuthContext = Depends(require_recent_auth),
+    services: RequestServices = Depends(get_services),
+) -> ServerConfigView:
+    """Reinicio controlado de la API y del worker de correo, para fallas críticas."""
+    config = await services.config.request_restart(actor=auth.principal.name)
+    await audit(
+        services,
+        auth,
+        action="server-config.restart.requested",
+        correlation=correlation_id(request),
+        details={"restart_generation": config.restart_generation},
     )
     return _config_view(config)
 

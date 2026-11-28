@@ -98,6 +98,39 @@ class ConfigService:
         await self._repo.save(config)
         return config
 
+    async def update_mail(
+        self,
+        *,
+        mail_from: str,
+        max_attempts: int,
+        backoff_base_seconds: int,
+        actor: str,
+    ) -> ServerConfig:
+        sender = mail_from.strip()
+        if sender and not _EMAIL.match(sender):
+            raise ValidationError("El remitente debe ser un correo válido o quedar vacío.")
+        if not 1 <= max_attempts <= 50:
+            raise ValidationError("Los intentos máximos deben estar entre 1 y 50.")
+        if not 1 <= backoff_base_seconds <= 3600:
+            raise ValidationError("La base de reintento debe estar entre 1 y 3600 segundos.")
+        config = await self.get()
+        config.mail_from = sender
+        config.mail_max_attempts = max_attempts
+        config.mail_backoff_base_seconds = backoff_base_seconds
+        config.updated_at = self._clock.now()
+        config.updated_by = actor
+        await self._repo.save(config)
+        return config
+
+    async def request_restart(self, *, actor: str) -> ServerConfig:
+        """Incrementa la generación: API y worker la ven y terminan para reiniciarse."""
+        config = await self.get()
+        config.restart_generation += 1
+        config.updated_at = self._clock.now()
+        config.updated_by = actor
+        await self._repo.save(config)
+        return config
+
     @staticmethod
     def validate_limits(values: dict[str, int]) -> None:
         for name, value in values.items():

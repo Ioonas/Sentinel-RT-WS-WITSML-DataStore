@@ -236,6 +236,10 @@ class ServerConfigRow(Base):
     support_uom_conversion: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    mail_from: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    mail_max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    mail_backoff_base_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    restart_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(String(255))
 

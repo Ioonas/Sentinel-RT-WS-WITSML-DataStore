@@ -85,6 +85,13 @@ class LimitsUpdateRequest(StrictModel):
     max_request_latest_values: int = Field(ge=1, le=2_147_483_647)
 
 
+class MailUpdateRequest(StrictModel):
+    # Vacío: el worker usa el remitente de entorno (SENTINEL_SMTP_FROM).
+    mail_from: str = Field(default="", max_length=255)
+    mail_max_attempts: int = Field(ge=1, le=50)
+    mail_backoff_base_seconds: int = Field(ge=1, le=3600)
+
+
 class ServiceInfoUpdateRequest(StrictModel):
     name: str = Field(min_length=3, max_length=255)
     description: str = Field(min_length=1, max_length=512)
@@ -123,6 +130,10 @@ class ServerConfigView(BaseModel):
     max_request_latest_values: int
     cascaded_delete: bool
     support_uom_conversion: bool
+    mail_from: str = ""
+    mail_max_attempts: int = 5
+    mail_backoff_base_seconds: int = 30
+    restart_generation: int = 0
     updated_at: datetime | None = None
     updated_by: str | None = None
 

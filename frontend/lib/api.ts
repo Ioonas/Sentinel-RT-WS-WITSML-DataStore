@@ -149,6 +149,10 @@ export type ServerConfigView = {
   max_request_latest_values: number;
   cascaded_delete: boolean;
   support_uom_conversion: boolean;
+  mail_from: string;
+  mail_max_attempts: number;
+  mail_backoff_base_seconds: number;
+  restart_generation: number;
   updated_at: string | null;
   updated_by: string | null;
 };

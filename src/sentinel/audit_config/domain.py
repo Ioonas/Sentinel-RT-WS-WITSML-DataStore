@@ -45,6 +45,13 @@ class ServerConfig:
     max_request_latest_values: int = 500
     cascaded_delete: bool = True
     support_uom_conversion: bool = False
+    # Correo: remitente vacío = el de entorno (SENTINEL_SMTP_FROM).
+    mail_from: str = ""
+    mail_max_attempts: int = 5
+    mail_backoff_base_seconds: int = 30
+    # Cada reinicio solicitado desde el panel incrementa este contador; los procesos
+    # que lo ven cambiar terminan para que su supervisor los vuelva a levantar.
+    restart_generation: int = 0
     updated_at: datetime | None = None
     updated_by: str | None = None
 

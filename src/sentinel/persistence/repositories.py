@@ -1026,6 +1026,10 @@ class SqlAlchemyConfigRepository:
             "max_request_latest_values",
             "cascaded_delete",
             "support_uom_conversion",
+            "mail_from",
+            "mail_max_attempts",
+            "mail_backoff_base_seconds",
+            "restart_generation",
             "updated_at",
             "updated_by",
         ):
@@ -1052,6 +1056,10 @@ class SqlAlchemyConfigRepository:
             max_request_latest_values=row.max_request_latest_values,
             cascaded_delete=row.cascaded_delete,
             support_uom_conversion=row.support_uom_conversion,
+            mail_from=row.mail_from,
+            mail_max_attempts=row.mail_max_attempts,
+            mail_backoff_base_seconds=row.mail_backoff_base_seconds,
+            restart_generation=row.restart_generation,
             updated_at=row.updated_at,
             updated_by=row.updated_by,
         )
@@ -1479,13 +1487,13 @@ class SqlAlchemyMailOutbox:
         )
 
     async def mark_failed(
-        self, job_id: str, error: str, next_attempt_at: datetime
+        self, job_id: str, error: str, next_attempt_at: datetime, max_attempts: int = 5
     ) -> None:
         row = await self._session.get(MailOutboxRow, job_id)
         if row is None:
             return
         row.last_error = error[:2000]
-        if row.attempts >= 5:
+        if row.attempts >= max_attempts:
             row.status = "failed"
         else:
             row.status = "pending"

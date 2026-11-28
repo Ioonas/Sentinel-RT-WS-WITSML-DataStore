@@ -14,12 +14,10 @@ from email.message import EmailMessage
 
 from sentinel.audit_config.domain import AuditChannel, AuditResult, MailJob
 from sentinel.bootstrap.container import Container
+from sentinel.bootstrap.restart import current_generation, wait_for_restart
 from sentinel.bootstrap.settings import Settings
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTEMPTS = 10
-
 
 class MailWorker:
     def __init__(self, container: Container) -> None:
@@ -29,14 +27,20 @@ class MailWorker:
     async def run_once(self) -> int:
         async with self._container.request() as services:
             now = self._container.clock.now()
+            config = await services.config.get()
+            sender = config.mail_from or self._settings.smtp_from
+            base = config.mail_backoff_base_seconds
             jobs = await services.repos.mail.claim_pending(now, limit=10)
             for job in jobs:
                 try:
-                    await asyncio.to_thread(self._send, job)
+                    await asyncio.to_thread(self._send, job, sender)
                 except Exception as exc:  # noqa: BLE001 - se registra sin secretos
-                    delay = min(3600, 30 * (2 ** min(job.attempts, 6)))
+                    delay = min(3600, base * (2 ** min(job.attempts, 6)))
                     await services.repos.mail.mark_failed(
-                        job.id, type(exc).__name__, now + timedelta(seconds=delay)
+                        job.id,
+                        type(exc).__name__,
+                        now + timedelta(seconds=delay),
+                        max_attempts=config.mail_max_attempts,
                     )
                     logger.warning(
                         "Correo %s falló (intento %s): %s",
@@ -58,10 +62,10 @@ class MailWorker:
                     logger.info("Correo %s enviado a %s", job.id, job.recipient)
             return len(jobs)
 
-    def _send(self, job: MailJob) -> None:
+    def _send(self, job: MailJob, sender: str) -> None:
         settings = self._settings
         message = EmailMessage()
-        message["From"] = settings.smtp_from
+        message["From"] = sender
         message["To"] = job.recipient
         message["Subject"] = job.subject
         message.set_content(job.body)
@@ -81,8 +85,13 @@ async def run_forever(settings: Settings | None = None) -> None:
     container = Container(resolved)
     worker = MailWorker(container)
     logger.info("Worker de correo iniciado (intervalo %ss)", resolved.mail_worker_interval_seconds)
+    started_generation = await current_generation(container)
+    restart_requested = asyncio.Event()
+    watcher = asyncio.create_task(
+        wait_for_restart(container, started_generation, restart_requested.set)
+    )
     try:
-        while True:
+        while not restart_requested.is_set():
             try:
                 processed = await worker.run_once()
             except Exception:  # noqa: BLE001 - el worker no debe morir por un ciclo
@@ -90,5 +99,7 @@ async def run_forever(settings: Settings | None = None) -> None:
                 processed = 0
             if not processed:
                 await asyncio.sleep(resolved.mail_worker_interval_seconds)
+        logger.warning("Worker de correo se detiene para reiniciarse")
     finally:
+        watcher.cancel()
         await container.dispose()
