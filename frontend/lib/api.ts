@@ -170,6 +170,20 @@ export type ServiceStatusView = {
   last_error: string | null;
 };
 
+export type MailOutboxView = {
+  id: string;
+  kind: string;
+  recipient: string;
+  subject: string;
+  status: string;
+  attempts: number;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  created_at: string | null;
+};
+
+export type MailOutboxPage = { items: MailOutboxView[]; next_cursor: string | null };
+
 export type ServiceAccountView = {
   id: string;
   name: string;

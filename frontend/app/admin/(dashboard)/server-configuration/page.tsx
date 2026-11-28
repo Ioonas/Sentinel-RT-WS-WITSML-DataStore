@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Alert, Button, Card, Field, Input, PageHeader, Spinner, StatusBadge } from "@/components/ui";
-import { Section, Stat } from "@/components/dashboard";
+import { Alert, Button, Card, EmptyState, Field, Input, PageHeader, Spinner, StatusBadge } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { QueryEmptyRow, Section, Stat } from "@/components/dashboard";
 import {
   ApiError,
   api,
+  type MailOutboxPage,
+  type MailOutboxView,
   type ServerConfigView,
   type ServiceStatusView,
   type SessionView,
@@ -23,9 +26,9 @@ const SECTIONS = [
   { id: "servicios", label: "Servicios" },
 ] as const;
 
-type Feedback = { tone: "ok" | "error"; text: string } | null;
-
 type ServiceName = "witsml" | "admin" | "mail-worker";
+type ServiceTarget = ServiceName | "all";
+type Feedback = { tone: "ok" | "error"; text: string } | null;
 
 const SERVICE_LABELS: Record<string, string> = {
   witsml: "la API WITSML",
@@ -33,12 +36,31 @@ const SERVICE_LABELS: Record<string, string> = {
   "mail-worker": "el worker de correo",
 };
 
-const STATE_LABELS: Record<string, string> = {
-  running: "En ejecución",
-  draining: "Terminando operaciones",
-  restarting: "Reiniciando",
-  stopped: "Detenido",
-};
+const TRANSITIONAL_STATES = new Set(["draining", "restarting"]);
+
+function Notice({ feedback }: { feedback: Feedback }) {
+  if (!feedback) return null;
+  return feedback.tone === "ok" ? <Alert tone="ok">{feedback.text}</Alert> : <Alert>{feedback.text}</Alert>;
+}
+
+function errorText(caught: unknown, fallback: string) {
+  return caught instanceof ApiError ? caught.message : fallback;
+}
+
+/** Estado visible de un proceso: sin latido se trata como sin respuesta. */
+function serviceBadge(service: ServiceStatusView): { status: "ok" | "warn" | "danger" | "neutral"; label: string } {
+  if (service.stale) return { status: "danger", label: "Sin respuesta" };
+  switch (service.state) {
+    case "running":
+      return { status: "ok", label: "En ejecución" };
+    case "draining":
+      return { status: "warn", label: "Terminando operaciones" };
+    case "restarting":
+      return { status: "warn", label: "Reiniciando" };
+    default:
+      return { status: "neutral", label: "Detenido" };
+  }
+}
 
 function ServiceRow({
   service,
@@ -51,15 +73,16 @@ function ServiceRow({
   busy: boolean;
   onRestart: (name: ServiceName) => void;
 }) {
-  const unreachable = service.stale;
-  const stateLabel = unreachable ? "Sin respuesta" : (STATE_LABELS[service.state] ?? service.state);
-  const pending = service.requested_generation > 0 && service.state === "draining";
+  const badge = serviceBadge(service);
+  const pending = !service.stale && TRANSITIONAL_STATES.has(service.state);
   return (
     <Card>
       <Section title={SERVICE_LABELS[service.name] ?? service.name}>
         <dl className={styles.detailsGrid}>
           <dt>Estado</dt>
-          <dd>{stateLabel}</dd>
+          <dd>
+            <StatusBadge status={badge.status} label={badge.label} />
+          </dd>
           <dt>Operaciones en curso</dt>
           <dd>{service.in_flight}</dd>
           <dt>Proceso (PID)</dt>
@@ -80,12 +103,12 @@ function ServiceRow({
           ) : null}
         </dl>
         {pending ? (
-          <p className={styles.faint}>Esperando a que terminen las operaciones en curso.</p>
+          <p className={styles.faint}>Espera a que terminen las operaciones en curso. Se actualiza sola.</p>
         ) : null}
         <div className={styles.actions}>
           <Button
             variant="danger"
-            disabled={!canEdit || busy || unreachable}
+            disabled={!canEdit || busy || service.stale || pending}
             onClick={() => onRestart(service.name as ServiceName)}
           >
             {busy ? "Solicitando…" : "Reiniciar"}
@@ -96,21 +119,13 @@ function ServiceRow({
   );
 }
 
-
-function Notice({ feedback }: { feedback: Feedback }) {
-  if (!feedback) return null;
-  return feedback.tone === "ok" ? <Alert tone="ok">{feedback.text}</Alert> : <Alert>{feedback.text}</Alert>;
-}
-
-function errorText(caught: unknown, fallback: string) {
-  return caught instanceof ApiError ? caught.message : fallback;
-}
-
 export default function ServerConfigurationPage() {
   const { data, error, loading, reload } = useApiQuery<ServerConfigView>("/server-config");
   const session = useApiQuery<SessionView>("/profile");
   // Solo el superadministrador cambia la configuración; el resto ve los valores.
   const canEdit = Boolean(session.data?.is_superadmin);
+
+  const [activeSection, setActiveSection] = useState<string>(SECTIONS[0].id);
 
   // General: contacto público.
   const [email, setEmail] = useState("");
@@ -127,17 +142,52 @@ export default function ServerConfigurationPage() {
   const [limitsBusy, setLimitsBusy] = useState(false);
   const [limitsFeedback, setLimitsFeedback] = useState<Feedback>(null);
 
-  // Correo: remitente y reintentos.
+  // Correo: remitente, reintentos y correos fallidos.
   const [mailFrom, setMailFrom] = useState("");
   const [mailAttempts, setMailAttempts] = useState("");
   const [mailBackoff, setMailBackoff] = useState("");
   const [mailBusy, setMailBusy] = useState(false);
   const [mailFeedback, setMailFeedback] = useState<Feedback>(null);
+  const failed = useApiQuery<MailOutboxPage>("/mail-outbox?status=failed&limit=50");
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryFeedback, setRetryFeedback] = useState<Feedback>(null);
 
   // Servicios: estado de cada proceso y reinicio independiente.
   const services = useApiQuery<ServiceStatusView[]>("/server-config/services");
-  const [restartBusy, setRestartBusy] = useState<string | null>(null);
+  const reloadServices = services.reload;
+  const [restartBusy, setRestartBusy] = useState<ServiceTarget | null>(null);
   const [restartFeedback, setRestartFeedback] = useState<Feedback>(null);
+  const [pendingRestart, setPendingRestart] = useState<ServiceTarget | null>(null);
+
+  const transitional = (services.data ?? []).some(
+    (service) => !service.stale && TRANSITIONAL_STATES.has(service.state),
+  );
+
+  // Mientras un servicio drena o reinicia, el estado se refresca solo.
+  useEffect(() => {
+    if (!transitional && restartBusy === null) return;
+    const id = window.setInterval(() => reloadServices(), 5000);
+    return () => window.clearInterval(id);
+  }, [transitional, restartBusy, reloadServices]);
+
+  // Marca la sección visible en la navegación.
+  useEffect(() => {
+    const elements = SECTIONS.map((section) => document.getElementById(section.id)).filter(
+      (element): element is HTMLElement => element !== null,
+    );
+    if (elements.length === 0 || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]) setActiveSection(visible[0].target.id);
+      },
+      { rootMargin: "-20% 0px -70% 0px" },
+    );
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [data]);
 
   useEffect(() => {
     if (!data) return;
@@ -239,31 +289,51 @@ export default function ServerConfigurationPage() {
     }
   }
 
-  async function requestRestart(service: ServiceName | "all") {
-    const label = SERVICE_LABELS[service] ?? "todos los servicios";
-    const confirmed = window.confirm(
-      `Se reiniciará ${label}. Cada proceso termina sus operaciones en curso antes de salir ` +
-        "(hasta 5 minutos); si no terminan, el reinicio se cancela. ¿Continuar?",
-    );
-    if (!confirmed) return;
-    setRestartBusy(service);
+  async function retryMail(job: MailOutboxView) {
+    setRetryingId(job.id);
+    setRetryFeedback(null);
+    try {
+      await api<MailOutboxView>(`/mail-outbox/${job.id}/retry`, { method: "POST" });
+      setRetryFeedback({
+        tone: "ok",
+        text: `Correo a ${job.recipient} vuelto a la cola. Se enviará en el próximo ciclo del worker.`,
+      });
+      failed.reload();
+      reload();
+    } catch (caught) {
+      setRetryFeedback({ tone: "error", text: errorText(caught, "No se pudo reintentar el correo.") });
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  async function requestRestart(target: ServiceTarget) {
+    setRestartBusy(target);
     setRestartFeedback(null);
+    const label = target === "all" ? "todos los servicios" : (SERVICE_LABELS[target] ?? target);
     try {
       await api<ServiceStatusView[]>("/server-config/restart", {
         method: "POST",
-        body: JSON.stringify({ service }),
+        body: JSON.stringify({ service: target }),
       });
       setRestartFeedback({
         tone: "ok",
         text: `Reinicio solicitado para ${label}. Esperando a que terminen sus operaciones en curso.`,
       });
-      services.reload();
+      reloadServices();
     } catch (caught) {
       setRestartFeedback({ tone: "error", text: errorText(caught, "No se pudo solicitar el reinicio.") });
     } finally {
       setRestartBusy(null);
     }
   }
+
+  const restartLabel =
+    pendingRestart === null
+      ? ""
+      : pendingRestart === "all"
+        ? "todos los servicios"
+        : (SERVICE_LABELS[pendingRestart] ?? pendingRestart);
 
   return (
     <div className={styles.stack}>
@@ -278,23 +348,28 @@ export default function ServerConfigurationPage() {
         }
       />
 
-      <nav aria-label="Secciones de configuración" className={styles.faint}>
-        <ul style={{ display: "flex", flexWrap: "wrap", gap: "1rem", listStyle: "none", padding: 0, margin: 0 }}>
+      <nav aria-label="Secciones de configuración" className={styles.sectionNav}>
+        <ul className={styles.sectionNavList}>
           {SECTIONS.map((section) => (
             <li key={section.id}>
-              <a href={`#${section.id}`}>{section.label}</a>
+              <a
+                className={styles.sectionNavLink}
+                href={`#${section.id}`}
+                aria-current={activeSection === section.id ? "location" : undefined}
+              >
+                {section.label}
+              </a>
             </li>
           ))}
         </ul>
       </nav>
 
       {error ? <Alert>{error.message}</Alert> : null}
-      {loading ? <Spinner /> : null}
+      {loading && !data ? <Spinner /> : null}
 
       {data ? (
         <>
-          <section id="general" aria-labelledby="general-title" className={styles.stack}>
-            <h2 id="general-title">General</h2>
+          <section id="general" aria-label="General" className={`${styles.stack} ${styles.anchorTarget}`}>
             <div className={styles.grid}>
               <Card>
                 <Stat label="Producto" value={data.product_name} hint={`Versión ${data.version}`} />
@@ -362,8 +437,7 @@ export default function ServerConfigurationPage() {
             </div>
           </section>
 
-          <section id="witsml" aria-labelledby="witsml-title" className={styles.stack}>
-            <h2 id="witsml-title">API WITSML</h2>
+          <section id="witsml" aria-label="API WITSML" className={`${styles.stack} ${styles.anchorTarget}`}>
             <Card>
               <Section
                 title="Identidad del servicio"
@@ -445,8 +519,7 @@ export default function ServerConfigurationPage() {
             </Card>
           </section>
 
-          <section id="admin-api" aria-labelledby="admin-api-title" className={styles.stack}>
-            <h2 id="admin-api-title">API administrativa</h2>
+          <section id="admin-api" aria-label="API administrativa" className={`${styles.stack} ${styles.anchorTarget}`}>
             <div className={styles.grid}>
               <Card>
                 <Stat label="Versión de API" value={data.api_version} hint="Versión de la API administrativa" />
@@ -470,8 +543,7 @@ export default function ServerConfigurationPage() {
             </Card>
           </section>
 
-          <section id="correo" aria-labelledby="correo-title" className={styles.stack}>
-            <h2 id="correo-title">API de correo</h2>
+          <section id="correo" aria-label="API de correo" className={`${styles.stack} ${styles.anchorTarget}`}>
             <Card>
               <Section
                 title="Remitente y reintentos"
@@ -510,16 +582,82 @@ export default function ServerConfigurationPage() {
                 ) : null}
               </Section>
             </Card>
+
+            <Card>
+              <Section
+                title="Correos fallidos"
+                description="Correos que agotaron sus intentos. Reintentar los devuelve a la cola."
+              >
+                <Notice feedback={retryFeedback} />
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th scope="col">Destinatario</th>
+                        <th scope="col">Asunto</th>
+                        <th scope="col" className={styles.numeric}>Intentos</th>
+                        <th scope="col">Último error</th>
+                        <th scope="col">Creado</th>
+                        <th scope="col"><span className={styles.faint}>Acción</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {failed.data && failed.data.items.length > 0 ? (
+                        failed.data.items.map((job) => (
+                          <tr key={job.id}>
+                            <td>{job.recipient}</td>
+                            <td>{job.subject}</td>
+                            <td className={styles.numeric}>{job.attempts}</td>
+                            <td>{job.last_error ?? "—"}</td>
+                            <td>{formatDateTime(job.created_at)}</td>
+                            <td>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                disabled={retryingId !== null}
+                                onClick={() => retryMail(job)}
+                              >
+                                {retryingId === job.id ? "Reintentando…" : "Reintentar"}
+                              </Button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <QueryEmptyRow
+                          colSpan={6}
+                          query={failed}
+                          empty="No hay correos fallidos."
+                          onRetry={failed.reload}
+                        />
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Section>
+            </Card>
           </section>
 
-          <section id="servicios" aria-labelledby="servicios-title" className={styles.stack}>
-            <h2 id="servicios-title">Servicios</h2>
+          <section id="servicios" aria-label="Servicios" className={`${styles.stack} ${styles.anchorTarget}`}>
             <p className={styles.faint}>
-              Reinicio por servicio, para fallas críticas. Un servicio que no responde o que
-              tiene operaciones en curso se muestra así; el reinicio espera a que terminen. Requiere
-              un supervisor que los relance (ver deploy/supervisor).
+              Reinicio por servicio, para fallas críticas. Cada proceso termina sus operaciones en curso antes de
+              salir; si no terminan a tiempo, el reinicio se cancela. Requiere un supervisor que los relance (ver
+              deploy/supervisor).
             </p>
             <Notice feedback={restartFeedback} />
+
+            {services.loading && !services.data ? <Spinner /> : null}
+            {services.error && !services.data ? (
+              <Alert>
+                No se pudo cargar el estado de los servicios.{" "}
+                <Button variant="ghost" size="sm" onClick={reloadServices}>
+                  Reintentar
+                </Button>
+              </Alert>
+            ) : null}
+            {services.data && services.data.length === 0 ? (
+              <EmptyState>No hay servicios registrados. Aplique las migraciones pendientes.</EmptyState>
+            ) : null}
+
             <div className={styles.grid}>
               {(services.data ?? []).map((service) => (
                 <ServiceRow
@@ -527,16 +665,16 @@ export default function ServerConfigurationPage() {
                   service={service}
                   canEdit={canEdit}
                   busy={restartBusy === service.name || restartBusy === "all"}
-                  onRestart={requestRestart}
+                  onRestart={(name) => setPendingRestart(name)}
                 />
               ))}
             </div>
-            {services.error ? <Alert>{services.error.message}</Alert> : null}
+
             <div className={styles.actions}>
               <Button
                 variant="danger"
                 disabled={!canEdit || restartBusy !== null}
-                onClick={() => requestRestart("all")}
+                onClick={() => setPendingRestart("all")}
               >
                 {restartBusy === "all" ? "Solicitando…" : "Reiniciar todos los servicios"}
               </Button>
@@ -546,6 +684,25 @@ export default function ServerConfigurationPage() {
             </p>
           </section>
         </>
+      ) : null}
+
+      {pendingRestart !== null ? (
+        <ConfirmDialog
+          title={`Reiniciar ${restartLabel}`}
+          description={
+            `Se reiniciará ${restartLabel}. Cada proceso termina sus operaciones en curso antes de salir ` +
+            "(hasta 5 minutos). Mientras tanto, la API rechaza solicitudes nuevas de escritura y WMLS con 503."
+          }
+          confirmLabel="Reiniciar"
+          tone="danger"
+          busy={restartBusy !== null}
+          onConfirm={() => {
+            const target = pendingRestart;
+            setPendingRestart(null);
+            requestRestart(target);
+          }}
+          onCancel={() => setPendingRestart(null)}
+        />
       ) : null}
     </div>
   );

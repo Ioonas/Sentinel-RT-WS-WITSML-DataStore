@@ -67,14 +67,28 @@ export function QueryEmptyRow({
   colSpan,
   query,
   empty,
+  onRetry,
 }: {
   colSpan: number;
   query: { loading: boolean; error: unknown };
   empty: ReactNode;
+  onRetry?: () => void;
 }) {
   if (query.loading) return <EmptyRow colSpan={colSpan}>Cargando…</EmptyRow>;
   if (query.error) {
-    return <EmptyRow colSpan={colSpan}>No se pudo cargar esta lista. Revise el aviso superior.</EmptyRow>;
+    return (
+      <EmptyRow colSpan={colSpan}>
+        <span>No se pudo cargar esta lista.</span>
+        {onRetry ? (
+          <>
+            {" "}
+            <Button variant="ghost" size="sm" onClick={onRetry}>
+              Reintentar
+            </Button>
+          </>
+        ) : null}
+      </EmptyRow>
+    );
   }
   return <EmptyRow colSpan={colSpan}>{empty}</EmptyRow>;
 }
@@ -82,7 +96,7 @@ export function QueryEmptyRow({
 export function PermissionList({ names }: { names: string[] }) {
   if (names.length === 0) return <span className={styles.faint}>—</span>;
   return (
-    <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
+    <ul className={styles.permissionList}>
       {names.map((name) => {
         const info = permissionInfo(name);
         return (
