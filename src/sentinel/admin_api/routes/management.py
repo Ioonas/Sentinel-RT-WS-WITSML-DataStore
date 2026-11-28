@@ -23,8 +23,6 @@ from sentinel.admin_api.schemas import (
     AdminUserUpdate,
     AuditEventView,
     AuditPage,
-    MailOutboxPage,
-    MailOutboxView,
     ContactUpdateRequest,
     CredentialView,
     GrantIn,
@@ -32,6 +30,9 @@ from sentinel.admin_api.schemas import (
     InvitationCreate,
     InvitationSummaryView,
     InvitationView,
+    LimitsUpdateRequest,
+    MailOutboxPage,
+    MailOutboxView,
     MessageView,
     PermissionView,
     ProfileSessionView,
@@ -166,6 +167,39 @@ async def update_contact(
         auth,
         action="server-config.contact.updated",
         correlation=correlation_id(request),
+    )
+    return _config_view(config)
+
+
+@router.put("/server-config/limits", response_model=ServerConfigView)
+async def update_limits(
+    payload: LimitsUpdateRequest,
+    request: Request,
+    auth: AuthContext = Depends(require_superadmin),
+    _: AuthContext = Depends(require_csrf),
+    services: RequestServices = Depends(get_services),
+) -> ServerConfigView:
+    """Límites operativos de WMLS. Solo superadministrador; cada cambio queda auditado."""
+    config = await services.config.update_limits(
+        max_data_nodes=payload.max_data_nodes,
+        max_data_points=payload.max_data_points,
+        growing_timeout_seconds=payload.growing_timeout_seconds,
+        change_detection_seconds=payload.change_detection_seconds,
+        max_request_latest_values=payload.max_request_latest_values,
+        actor=auth.principal.name,
+    )
+    await audit(
+        services,
+        auth,
+        action="server-config.limits.updated",
+        correlation=correlation_id(request),
+        details={
+            "max_data_nodes": payload.max_data_nodes,
+            "max_data_points": payload.max_data_points,
+            "growing_timeout_seconds": payload.growing_timeout_seconds,
+            "change_detection_seconds": payload.change_detection_seconds,
+            "max_request_latest_values": payload.max_request_latest_values,
+        },
     )
     return _config_view(config)
 

@@ -7,11 +7,12 @@ administración y ``WMLS_GetCap`` leen de aquí (DRY, §6).
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from datetime import datetime
 
 from sentinel.audit_config.domain import (
+    UNLIMITED_DATA,
     AuditChannel,
     AuditEvent,
     AuditResult,
@@ -67,6 +68,43 @@ class ConfigService:
         config.updated_by = actor
         await self._repo.save(config)
         return config
+
+    async def update_limits(
+        self,
+        *,
+        max_data_nodes: int,
+        max_data_points: int,
+        growing_timeout_seconds: int,
+        change_detection_seconds: int,
+        max_request_latest_values: int,
+        actor: str,
+    ) -> ServerConfig:
+        values = {
+            "maxDataNodes": max_data_nodes,
+            "maxDataPoints": max_data_points,
+            "growingTimeoutSeconds": growing_timeout_seconds,
+            "changeDetectionSeconds": change_detection_seconds,
+            "maxRequestLatestValues": max_request_latest_values,
+        }
+        self.validate_limits(values)
+        config = await self.get()
+        config.max_data_nodes = max_data_nodes
+        config.max_data_points = max_data_points
+        config.growing_timeout_seconds = growing_timeout_seconds
+        config.change_detection_seconds = change_detection_seconds
+        config.max_request_latest_values = max_request_latest_values
+        config.updated_at = self._clock.now()
+        config.updated_by = actor
+        await self._repo.save(config)
+        return config
+
+    @staticmethod
+    def validate_limits(values: dict[str, int]) -> None:
+        for name, value in values.items():
+            if not 1 <= value <= UNLIMITED_DATA:
+                raise ValidationError(
+                    f"{name} debe estar entre 1 y {UNLIMITED_DATA:,}."
+                )
 
     @staticmethod
     def validate_service_info(name: str, description: str) -> None:

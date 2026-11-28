@@ -23,12 +23,29 @@ export default function ServerConfigurationPage() {
   const [serviceFeedback, setServiceFeedback] = useState<string | null>(null);
   const [serviceError, setServiceError] = useState<string | null>(null);
   const [serviceBusy, setServiceBusy] = useState(false);
+  const [limits, setLimits] = useState({
+    nodes: "",
+    points: "",
+    growing: "",
+    change: "",
+    latest: "",
+  });
+  const [limitsBusy, setLimitsBusy] = useState(false);
+  const [limitsFeedback, setLimitsFeedback] = useState<string | null>(null);
+  const [limitsError, setLimitsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (data) {
       setEmail(data.contact_email);
       setPhone(data.contact_phone);
       setServiceName(data.contact_name);
+      setLimits({
+        nodes: String(data.max_data_nodes),
+        points: String(data.max_data_points),
+        growing: String(data.growing_timeout_seconds),
+        change: String(data.change_detection_seconds),
+        latest: String(data.max_request_latest_values),
+      });
       setServiceDescription(data.description);
     }
   }, [data]);
@@ -49,6 +66,31 @@ export default function ServerConfigurationPage() {
       setServiceError(caught instanceof ApiError ? caught.message : "No se pudo guardar.");
     } finally {
       setServiceBusy(false);
+    }
+  }
+
+  async function submitLimits(event: FormEvent) {
+    event.preventDefault();
+    setLimitsBusy(true);
+    setLimitsFeedback(null);
+    setLimitsError(null);
+    try {
+      await api<ServerConfigView>("/server-config/limits", {
+        method: "PUT",
+        body: JSON.stringify({
+          max_data_nodes: Number(limits.nodes),
+          max_data_points: Number(limits.points),
+          growing_timeout_seconds: Number(limits.growing),
+          change_detection_seconds: Number(limits.change),
+          max_request_latest_values: Number(limits.latest),
+        }),
+      });
+      setLimitsFeedback("Límites operativos actualizados. Aplican a las siguientes solicitudes.");
+      reload();
+    } catch (caught) {
+      setLimitsError(caught instanceof ApiError ? caught.message : "No se pudieron guardar los límites.");
+    } finally {
+      setLimitsBusy(false);
     }
   }
 
@@ -214,15 +256,55 @@ export default function ServerConfigurationPage() {
           <Card>
             <Section
               title="Límites operativos"
-              description="Valores efectivos aplicados a solicitudes WMLS y detección de cambios."
+              description={
+                canEdit
+                  ? "Valores aplicados a solicitudes WMLS y detección de cambios. Solo superadministrador; cada cambio queda auditado."
+                  : "Valores efectivos aplicados a solicitudes WMLS y detección de cambios."
+              }
             >
-              <div className={styles.grid}>
-                <Stat label="Máx. nodos de datos" value={data.max_data_nodes.toLocaleString("es")} />
-                <Stat label="Máx. puntos de datos" value={data.max_data_points.toLocaleString("es")} />
-                <Stat label="Timeout growing" value={`${data.growing_timeout_seconds} s`} />
-                <Stat label="Detección de cambios" value={`${data.change_detection_seconds} s`} />
-                <Stat label="Máx. latest values" value={data.max_request_latest_values.toLocaleString("es")} />
-              </div>
+              {canEdit ? (
+                <form onSubmit={submitLimits}>
+                  <fieldset className={styles.plain} disabled={limitsBusy}>
+                    <div className={styles.grid}>
+                      <Field label="Máx. nodos de datos" htmlFor="limit-nodes" hint="maxDataNodes en GetCap y en solicitudes.">
+                        <Input id="limit-nodes" type="number" min={1} max={2147483647} required value={limits.nodes}
+                          onChange={(event) => setLimits({ ...limits, nodes: event.target.value })} />
+                      </Field>
+                      <Field label="Máx. puntos de datos" htmlFor="limit-points" hint="maxDataPoints en GetCap y en solicitudes.">
+                        <Input id="limit-points" type="number" min={1} max={2147483647} required value={limits.points}
+                          onChange={(event) => setLimits({ ...limits, points: event.target.value })} />
+                      </Field>
+                      <Field label="Timeout growing (s)" htmlFor="limit-growing" hint="Tiempo sin datos para dar por cerrado un log creciente.">
+                        <Input id="limit-growing" type="number" min={1} max={2147483647} required value={limits.growing}
+                          onChange={(event) => setLimits({ ...limits, growing: event.target.value })} />
+                      </Field>
+                      <Field label="Detección de cambios (s)" htmlFor="limit-change" hint="Intervalo de detección de cambios.">
+                        <Input id="limit-change" type="number" min={1} max={2147483647} required value={limits.change}
+                          onChange={(event) => setLimits({ ...limits, change: event.target.value })} />
+                      </Field>
+                      <Field label="Máx. latest values" htmlFor="limit-latest" hint="Valores más recientes por solicitud.">
+                        <Input id="limit-latest" type="number" min={1} max={2147483647} required value={limits.latest}
+                          onChange={(event) => setLimits({ ...limits, latest: event.target.value })} />
+                      </Field>
+                    </div>
+                    {limitsError ? <Alert>{limitsError}</Alert> : null}
+                    {limitsFeedback ? <p className={styles.faint}>{limitsFeedback}</p> : null}
+                    <div className={styles.actions}>
+                      <Button type="submit" variant="primary" disabled={limitsBusy}>
+                        {limitsBusy ? "Guardando…" : "Guardar límites"}
+                      </Button>
+                    </div>
+                  </fieldset>
+                </form>
+              ) : (
+                <div className={styles.grid}>
+                  <Stat label="Máx. nodos de datos" value={data.max_data_nodes.toLocaleString("es")} />
+                  <Stat label="Máx. puntos de datos" value={data.max_data_points.toLocaleString("es")} />
+                  <Stat label="Timeout growing" value={`${data.growing_timeout_seconds} s`} />
+                  <Stat label="Detección de cambios" value={`${data.change_detection_seconds} s`} />
+                  <Stat label="Máx. latest values" value={data.max_request_latest_values.toLocaleString("es")} />
+                </div>
+              )}
             </Section>
           </Card>
         </>

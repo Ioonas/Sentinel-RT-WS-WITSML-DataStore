@@ -77,6 +77,14 @@ class ReauthRequest(StrictModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class LimitsUpdateRequest(StrictModel):
+    max_data_nodes: int = Field(ge=1, le=2_147_483_647)
+    max_data_points: int = Field(ge=1, le=2_147_483_647)
+    growing_timeout_seconds: int = Field(ge=1, le=2_147_483_647)
+    change_detection_seconds: int = Field(ge=1, le=2_147_483_647)
+    max_request_latest_values: int = Field(ge=1, le=2_147_483_647)
+
+
 class ServiceInfoUpdateRequest(StrictModel):
     name: str = Field(min_length=3, max_length=255)
     description: str = Field(min_length=1, max_length=512)
